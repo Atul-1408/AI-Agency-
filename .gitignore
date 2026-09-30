@@ -1,0 +1,47 @@
+# ── Environment ──────────────────────────────────────────────
+.env
+.env.local
+.env.production
+
+# ── Node ─────────────────────────────────────────────────────
+node_modules/
+.next/
+dist/
+build/
+.turbo/
+
+# ── Python ───────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+*.egg
+dist/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ── Database ─────────────────────────────────────────────────
+*.sqlite3
+*.db
+
+# ── Logs ─────────────────────────────────────────────────────
+*.log
+logs/
+
+# ── OS ───────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── IDE ──────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+
+# ── Generated secrets ────────────────────────────────────────
+*.pem
+*.key
+credentials.json
+token.json

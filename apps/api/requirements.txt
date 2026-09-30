@@ -1,0 +1,81 @@
+# ============================================================
+# AI Web Agency Agent — Phase 1 Backend Dependencies
+# Verified working on Python 3.14.2 / Windows
+#
+# INSTALL:
+#   python -m venv .venv
+#   .venv\Scripts\activate
+#   pip install -r requirements.txt
+#
+# INFRASTRUCTURE (not installed by pip):
+#   PostgreSQL 16  →  see QUICKSTART.md
+#   Redis 7        →  see QUICKSTART.md
+#
+# KNOWN LIMITATION — asyncpg:
+#   asyncpg requires Microsoft C++ Build Tools to compile on Windows.
+#   It is NOT included in this requirements.txt.
+#   To install asyncpg after setting up MSVC Build Tools:
+#     pip install asyncpg
+#   Without asyncpg, the API starts but database connections fail.
+#   The health endpoint will report database as "unavailable" — this is correct.
+# ============================================================
+
+aiosqlite==0.22.1
+alembic==1.20.0
+annotated-types==0.8.0
+anyio==4.15.1
+arq==0.28.0
+bcrypt==3.2.2
+certifi==2026.7.22
+cffi==2.1.1
+click==8.5.0
+colorama==0.4.6
+cryptography==50.0.1
+ecdsa==0.19.2
+email-validator==2.3.0
+fastapi==0.115.14
+greenlet==3.5.6
+h11==0.16.0
+hiredis==3.4.2
+httpcore==1.0.9
+httpcore2==2.13.1
+httptools==0.8.0
+httpx==0.28.1
+httpx2==2.13.1
+idna==3.20
+iniconfig==2.3.0
+jiter==0.17.0
+Mako==1.4.3
+MarkupSafe==3.0.3
+openai==3.22.1
+packaging==26.3
+passlib==1.7.4
+pluggy==1.6.0
+pyasn1==0.6.4
+pycparser==3.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+pydantic_core==2.46.5
+Pygments==2.21.0
+PyJWT==2.15.1
+pytest==9.1.1
+pytest-asyncio==1.4.0
+python-dotenv==1.2.3
+python-jose==3.5.0
+python-multipart==0.0.32
+PyYAML==6.0.3
+redis==5.3.1
+rsa==4.9.1
+ruff==0.16.9
+six==1.17.0
+sniffio==1.3.1
+SQLAlchemy==2.1.1
+starlette==0.46.2
+structlog==26.1.0
+tenacity==9.1.4
+truststore==0.10.4
+typing-inspection==0.4.4
+typing_extensions==4.16.0
+uvicorn==0.54.0
+watchfiles==1.3.0
+websockets==17.1
