@@ -16,7 +16,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.types import JSON
@@ -62,6 +62,25 @@ class ApprovalStatus(str, enum.Enum):
     PENDING = "pending"     # Awaiting owner decision
     APPROVED = "approved"   # Owner approved — agent may proceed
     REJECTED = "rejected"   # Owner rejected — agent must stop
+
+
+class LeadStatus(str, enum.Enum):
+    """Lifecycle status of a business lead."""
+    DISCOVERED = "discovered"       # Found via discovery provider
+    RESEARCHING = "researching"     # Currently being audited
+    RESEARCHED = "researched"       # Technical audit completed
+    QUALIFIED = "qualified"         # Opportunity score >= 60
+    DISQUALIFIED = "disqualified"   # Score < 30 or suppression match
+    APPROVED = "approved"           # Owner approved for outreach
+    REJECTED = "rejected"           # Owner rejected
+
+
+class EmailVerificationStatus(str, enum.Enum):
+    """Honest verification states for discovered business email."""
+    UNVERIFIED = "unverified"
+    SYNTAX_VALID = "syntax_valid"
+    MX_VERIFIED = "mx_verified"
+    UNREACHABLE = "unreachable"
 
 
 # ── Phase 1 Models ────────────────────────────────────────────────────────────
@@ -151,3 +170,77 @@ class ApprovalRequest(UUIDPKMixin, TimestampMixin, Base):
     agent_run: Mapped[Optional["AgentRun"]] = relationship(
         back_populates="approval_requests"
     )
+
+
+# ── Phase 2 Models ────────────────────────────────────────────────────────────
+
+class Lead(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Business prospect discovered and qualified for web agency services.
+    Every lead retains full provenance and an objective opportunity score.
+    """
+    __tablename__ = "leads"
+
+    company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    domain: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    website_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    email_verification_status: Mapped[EmailVerificationStatus] = mapped_column(
+        Enum(EmailVerificationStatus, name="email_verification_status", native_enum=False),
+        default=EmailVerificationStatus.UNVERIFIED,
+        nullable=False,
+    )
+    address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    qualification_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
+    status: Mapped[LeadStatus] = mapped_column(
+        Enum(LeadStatus, name="lead_status", native_enum=False),
+        default=LeadStatus.DISCOVERED,
+        nullable=False,
+        index=True,
+    )
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    # Source provenance
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    source_query: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    source_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+
+    # Relationships
+    research: Mapped[Optional["LeadResearch"]] = relationship(
+        back_populates="lead",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
+
+class LeadResearch(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Objective technical audit and observable signals for a lead.
+    Zero subjective AI claims — strictly recorded factual technical indicators.
+    """
+    __tablename__ = "lead_research"
+
+    lead_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("leads.id", ondelete="CASCADE"),
+        unique=True,
+        nullable=False,
+        index=True,
+    )
+
+    has_website: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    is_responsive: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    has_ssl: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    load_time_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    copyright_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    tech_stack: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    audit_findings: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
+    research_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    lead: Mapped["Lead"] = relationship(back_populates="research")
+

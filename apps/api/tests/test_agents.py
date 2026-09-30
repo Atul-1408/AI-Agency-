@@ -19,13 +19,14 @@ async def test_agent_registry_structure(client: AsyncClient):
 
     agents = data["agents"]
 
-    # Phase 1 — active
+    # Phase 1 & 2 — active
     assert agents["orchestrator"]["phase"] == 1
     assert agents["orchestrator"]["active"] is True
+    assert agents["lead_research"]["phase"] == 2
+    assert agents["lead_research"]["active"] is True
 
-    # Phase 2+ — registered but not active
+    # Phase 3+ — registered but not active
     expected_inactive = {
-        "lead_research": 2,
         "outreach": 3,
         "follow_up": 4,
         "client_intelligence": 5,
@@ -36,7 +37,7 @@ async def test_agent_registry_structure(client: AsyncClient):
     for name, phase in expected_inactive.items():
         assert name in agents, f"Agent '{name}' missing from registry"
         assert agents[name]["phase"] == phase
-        assert agents[name]["active"] is False, f"Agent '{name}' should not be active in Phase 1"
+        assert agents[name]["active"] is False, f"Agent '{name}' should not be active in Phase 2"
 
 
 @pytest.mark.asyncio
@@ -52,16 +53,16 @@ async def test_trigger_unknown_agent_returns_400(client: AsyncClient, auth_heade
 
 
 @pytest.mark.asyncio
-async def test_trigger_phase2_agent_returns_400(client: AsyncClient, auth_headers: dict):
-    """Triggering a Phase 2+ agent should return 400 with helpful message."""
+async def test_trigger_phase3_agent_returns_400(client: AsyncClient, auth_headers: dict):
+    """Triggering a Phase 3+ agent should return 400 with helpful message."""
     response = await client.post(
         "/api/v1/agents/trigger",
-        json={"agent_name": "lead_research"},
+        json={"agent_name": "outreach"},
         headers=auth_headers,
     )
     assert response.status_code == 400
     detail = response.json()["detail"]
-    assert "Phase 2" in detail
+    assert "Phase 3" in detail
     assert "not active" in detail
 
 

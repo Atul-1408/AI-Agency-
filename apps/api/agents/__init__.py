@@ -15,5 +15,6 @@ Future phases add agents here when approved:
 """
 from agents.base_agent import AIProvider, BaseAgent
 from agents.orchestrator import Orchestrator
+from agents.lead_research import LeadResearchAgent
 
-__all__ = ["BaseAgent", "AIProvider", "Orchestrator"]
+__all__ = ["BaseAgent", "AIProvider", "Orchestrator", "LeadResearchAgent"]

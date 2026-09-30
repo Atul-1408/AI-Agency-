@@ -40,7 +40,7 @@ log = structlog.get_logger(__name__)
 # Others are registered so the API is future-proof, but clearly labelled.
 AGENT_REGISTRY: dict[str, dict] = {
     "orchestrator":          {"phase": 1, "active": True},
-    "lead_research":         {"phase": 2, "active": False},
+    "lead_research":         {"phase": 2, "active": True},
     "outreach":              {"phase": 3, "active": False},
     "follow_up":             {"phase": 4, "active": False},
     "client_intelligence":   {"phase": 5, "active": False},

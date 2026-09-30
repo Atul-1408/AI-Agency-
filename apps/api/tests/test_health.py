@@ -70,6 +70,6 @@ async def test_root_endpoint(client: AsyncClient):
     response = await client.get("/")
     assert response.status_code == 200
     data = response.json()
-    assert data["phase"] == 1
+    assert data["phase"] == 2
     assert "version" in data
     assert "health" in data

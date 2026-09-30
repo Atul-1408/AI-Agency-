@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-from models import AgentRunStatus, ApprovalStatus
+from models import AgentRunStatus, ApprovalStatus, EmailVerificationStatus, LeadStatus
 
 
 # ── Shared ────────────────────────────────────────────────────────────────────
@@ -108,3 +108,68 @@ class HealthResponse(BaseModel):
     version: str
     environment: str
     services: Dict[str, ServiceStatus]
+
+
+# ── Phase 2: Leads ────────────────────────────────────────────────────────────
+
+class LeadResearchResponse(BaseModel):
+    id: uuid.UUID
+    lead_id: uuid.UUID
+    has_website: bool
+    is_responsive: Optional[bool]
+    has_ssl: Optional[bool]
+    status_code: Optional[int]
+    load_time_ms: Optional[int]
+    copyright_year: Optional[int]
+    tech_stack: Optional[Dict[str, Any]]
+    audit_findings: Optional[Dict[str, Any]]
+    research_notes: Optional[str]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LeadResponse(BaseModel):
+    id: uuid.UUID
+    company_name: str
+    domain: str
+    website_url: Optional[str]
+    phone: Optional[str]
+    email: Optional[str]
+    email_verification_status: EmailVerificationStatus
+    address: Optional[str]
+    industry: Optional[str]
+    qualification_score: int
+    status: LeadStatus
+    rejection_reason: Optional[str]
+    source_type: str
+    source_query: Optional[str]
+    source_url: Optional[str]
+    research: Optional[LeadResearchResponse] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class DiscoverLeadsRequest(BaseModel):
+    query: str = Field(..., min_length=2, description="Target business niche or query, e.g. 'plumbers'")
+    location: Optional[str] = Field(default=None, description="Target city or area, e.g. 'Austin, TX'")
+    limit: int = Field(default=10, ge=1, le=20, description="Max prospects to discover (batch limit: 20)")
+    provider: str = Field(default="google_places", description="Discovery provider name ('google_places' or 'manual_entry')")
+
+
+class ManualLeadCreateRequest(BaseModel):
+    company_name: str = Field(..., min_length=1, description="Business name")
+    website_url: Optional[str] = Field(default=None, description="Official website URL")
+    domain: Optional[str] = Field(default=None, description="Domain name (auto-derived if omitted)")
+    phone: Optional[str] = Field(default=None, description="Public phone number")
+    address: Optional[str] = Field(default=None, description="Business address")
+    industry: Optional[str] = Field(default=None, description="Industry/category")
+    notes: Optional[str] = Field(default=None, description="Owner notes")
+
+
+class LeadRejectRequest(BaseModel):
+    reason: Optional[str] = Field(default=None, description="Reason for rejecting the lead")
+

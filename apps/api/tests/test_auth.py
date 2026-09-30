@@ -102,4 +102,5 @@ async def test_agent_registry_is_public(client: AsyncClient):
     assert "agents" in data
     assert "orchestrator" in data["agents"]
     assert data["agents"]["orchestrator"]["active"] is True
-    assert data["agents"]["lead_research"]["active"] is False
+    assert data["agents"]["lead_research"]["active"] is True
+    assert data["agents"]["outreach"]["active"] is False

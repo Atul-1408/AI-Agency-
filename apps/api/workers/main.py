@@ -39,13 +39,9 @@ async def run_orchestrator_agent(ctx: dict, run_id: str, input_data: dict) -> di
 # returning empty data or fake success.
 
 async def run_lead_research_agent(ctx: dict, run_id: str, input_data: dict) -> dict:
-    """Phase 2: Not yet implemented."""
-    log.info("Lead research agent called but not yet implemented (Phase 2)", run_id=run_id)
-    return {
-        "status": "not_implemented",
-        "phase": 2,
-        "message": "Lead Research Agent will be implemented in Phase 2.",
-    }
+    """Phase 2: Active. Calls LeadResearchAgent.run()."""
+    from agents.lead_research import LeadResearchAgent
+    return await LeadResearchAgent().run(run_id, input_data)
 
 
 async def run_outreach_agent(ctx: dict, run_id: str, input_data: dict) -> dict:

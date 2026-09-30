@@ -4,9 +4,14 @@
 
 ---
 
-## Current Status: Phase 1 — Foundation ✅
-
-See [project plan](docs/PROJECT_PLAN.md) for the full 10-phase roadmap.
+## Current Status: Phase 2 — Lead Research Agent ✅
+- Phase 1: Foundation ✅
+- Phase 2: Lead Research Agent ✅
+  - Pluggable discovery providers (`GooglePlacesProvider`, `ManualEntryProvider`)
+  - SSRF-protected, crawl-delay-compliant `WebsiteAuditorTool` (objective findings only)
+  - Public corporate contact finder (`PublicContactFinderTool`) with verified MX status
+  - Deterministic qualification scoring (0–100) & duplicate detection
+  - Human approval gate & Next.js Lead Pipeline Dashboard (`/dashboard/leads`)
 
 ## Quick Start
 

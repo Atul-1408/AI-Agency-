@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.logging import configure_logging
-from routers import agents, auth, health
+from routers import agents, auth, health, leads
 
 # Configure logging before anything else
 configure_logging(log_level=settings.LOG_LEVEL, production=settings.is_production)
@@ -99,6 +99,7 @@ async def global_exception_handler(request: Request, exc: Exception) -> JSONResp
 app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
+app.include_router(leads.router, prefix="/api/v1/leads", tags=["leads"])
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────
@@ -107,7 +108,8 @@ async def root() -> dict:
     return {
         "name": "AI Web Agency Agent",
         "version": VERSION,
-        "phase": 1,
+        "phase": 2,
+        "phase_name": "Lead Research Agent",
         "environment": settings.APP_ENV,
         "docs": "/api/docs",
         "health": "/api/v1/health",

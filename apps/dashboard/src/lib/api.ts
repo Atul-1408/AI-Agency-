@@ -125,6 +125,61 @@ export interface AgentRegistryEntry {
   active: boolean;
 }
 
+export type LeadStatus =
+  | "discovered"
+  | "researching"
+  | "researched"
+  | "qualified"
+  | "disqualified"
+  | "approved"
+  | "rejected";
+
+export type EmailVerificationStatus =
+  | "unverified"
+  | "syntax_valid"
+  | "mx_verified"
+  | "unreachable";
+
+export interface LeadResearch {
+  id: string;
+  lead_id: string;
+  has_website: boolean;
+  is_responsive: boolean | null;
+  has_ssl: boolean | null;
+  status_code: number | null;
+  load_time_ms: number | null;
+  copyright_year: number | null;
+  tech_stack: Record<string, unknown> | null;
+  audit_findings: {
+    findings?: string[];
+    scoring_breakdown?: Array<{ factor: string; points: number; reason: string }>;
+  } | null;
+  research_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Lead {
+  id: string;
+  company_name: string;
+  domain: string;
+  website_url: string | null;
+  phone: string | null;
+  email: string | null;
+  email_verification_status: EmailVerificationStatus;
+  address: string | null;
+  industry: string | null;
+  qualification_score: number;
+  status: LeadStatus;
+  rejection_reason: string | null;
+  source_type: string;
+  source_query: string | null;
+  source_url: string | null;
+  research?: LeadResearch | null;
+  created_at: string;
+  updated_at: string;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
 export const api = {
@@ -182,6 +237,63 @@ export const api = {
       apiFetch<ApprovalRequest>(`/api/v1/agents/approvals/${id}/decide`, {
         method: "POST",
         body: JSON.stringify({ decision, owner_note: note ?? null }),
+      }),
+  },
+
+  // Leads (Phase 2) — auth required
+  leads: {
+    list: (params?: {
+      page?: number;
+      page_size?: number;
+      status?: string;
+      min_score?: number;
+      industry?: string;
+      search?: string;
+    }) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {})
+          .filter(([, v]) => v !== undefined && v !== "")
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return apiFetch<PaginatedResponse<Lead>>(`/api/v1/leads${qs ? `?${qs}` : ""}`);
+    },
+
+    get: (id: string) => apiFetch<Lead>(`/api/v1/leads/${id}`),
+
+    discover: (payload: { query: string; location?: string; limit?: number; provider?: string }) =>
+      apiFetch<AgentRun>("/api/v1/leads/discover", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    createManual: (payload: {
+      company_name: string;
+      website_url?: string;
+      domain?: string;
+      phone?: string;
+      address?: string;
+      industry?: string;
+      notes?: string;
+    }) =>
+      apiFetch<Lead>("/api/v1/leads/manual", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+
+    approve: (id: string) =>
+      apiFetch<Lead>(`/api/v1/leads/${id}/approve`, {
+        method: "POST",
+      }),
+
+    reject: (id: string, reason?: string) =>
+      apiFetch<Lead>(`/api/v1/leads/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+
+    requalify: (id: string) =>
+      apiFetch<Lead>(`/api/v1/leads/${id}/qualify`, {
+        method: "POST",
       }),
   },
 };
