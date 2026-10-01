@@ -79,3 +79,48 @@ def test_scorer_suppressed_lead():
     eval_res = scorer.evaluate(audit, contact, is_suppressed=True)
     assert eval_res.score == 0
     assert eval_res.status == LeadStatus.DISQUALIFIED
+
+
+def test_scorer_score_boundaries():
+    """Verify deterministic boundary thresholds: >=60 QUALIFIED, 30-59 LOW_PRIORITY, <30 DISQUALIFIED."""
+    scorer = QualificationScorerTool()
+
+    # Exact boundary checks
+    assert scorer.status_for_score(60) == LeadStatus.QUALIFIED
+    assert scorer.status_for_score(59) == LeadStatus.LOW_PRIORITY
+    assert scorer.status_for_score(30) == LeadStatus.LOW_PRIORITY
+    assert scorer.status_for_score(29) == LeadStatus.DISQUALIFIED
+
+
+def test_scorer_realistic_score_thresholds():
+    """Verify realistic factor evaluations produce exact expected LeadStatus tiers."""
+    scorer = QualificationScorerTool()
+
+    # Score = 60 (Not responsive 25 + Insecure 15 + Outdated copyright 10 + Email 10 = 60) -> QUALIFIED
+    audit_60 = AuditResult(has_website=True, status_code=200, is_responsive=False, has_ssl=False, copyright_year=2018)
+    contact_60 = ContactInfo(email="test@biz.com", phone="555-0000")
+    res_60 = scorer.evaluate(audit_60, contact_60)
+    assert res_60.score == 60
+    assert res_60.status == LeadStatus.QUALIFIED
+
+    # Score = 55 (Broken website 35 + Email 10 + Reviews 10 = 55) -> LOW_PRIORITY
+    audit_55 = AuditResult(has_website=True, status_code=404)
+    contact_55 = ContactInfo(email="test@biz.com", phone="555-0000")
+    raw_55 = {"user_ratings_total": 25}
+    res_55 = scorer.evaluate(audit_55, contact_55, raw_data=raw_55)
+    assert res_55.score == 55
+    assert res_55.status == LeadStatus.LOW_PRIORITY
+
+    # Score = 30 (Outdated copyright 10 + Slow TTFB 10 + Email 10 = 30) -> LOW_PRIORITY
+    audit_30 = AuditResult(has_website=True, status_code=200, has_ssl=True, is_responsive=True, copyright_year=2018, load_time_ms=3000)
+    contact_30 = ContactInfo(email="test@biz.com", phone="555-0000")
+    res_30 = scorer.evaluate(audit_30, contact_30)
+    assert res_30.score == 30
+    assert res_30.status == LeadStatus.LOW_PRIORITY
+
+    # Score = 20 (Outdated copyright 10 + Email 10 = 20) -> DISQUALIFIED
+    audit_20 = AuditResult(has_website=True, status_code=200, has_ssl=True, is_responsive=True, copyright_year=2018)
+    contact_20 = ContactInfo(email="test@biz.com", phone="555-0000")
+    res_20 = scorer.evaluate(audit_20, contact_20)
+    assert res_20.score == 20
+    assert res_20.status == LeadStatus.DISQUALIFIED

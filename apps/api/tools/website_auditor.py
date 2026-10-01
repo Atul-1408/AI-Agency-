@@ -34,9 +34,12 @@ PRIVATE_CIDRS = [
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("169.254.0.0/16"),
     ipaddress.ip_network("0.0.0.0/8"),
-    ipaddress.ip_network("::1/128"),
-    ipaddress.ip_network("fc00::/7"),
-    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT
+    ipaddress.ip_network("198.18.0.0/15"),     # Benchmarking
+    ipaddress.ip_network("::1/128"),           # IPv6 Loopback
+    ipaddress.ip_network("fc00::/7"),          # IPv6 Unique Local
+    ipaddress.ip_network("fe80::/10"),         # IPv6 Link-Local
+    ipaddress.ip_network("::ffff:0:0/96"),     # IPv4-mapped IPv6
 ]
 
 
@@ -47,17 +50,32 @@ class SSRFBlockedError(Exception):
 
 def validate_url_safety(url: str) -> None:
     """
-    Validate that the URL does not resolve to private, loopback, or link-local addresses.
+    Validate that the URL does not resolve to private, loopback, link-local, or restricted addresses.
     Raises SSRFBlockedError if unsafe.
     """
     parsed = urllib.parse.urlparse(url)
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise SSRFBlockedError(f"Unsupported scheme '{scheme}'. Only HTTP/HTTPS allowed.")
+
     hostname = parsed.hostname
     if not hostname:
         raise SSRFBlockedError(f"Invalid URL structure: {url}")
 
     # Check for localhost / loopback aliases
-    if hostname.lower() in ("localhost", "127.0.0.1", "::1"):
+    if hostname.lower() in ("localhost", "127.0.0.1", "::1", "0.0.0.0", "127.0.0.0"):
         raise SSRFBlockedError(f"Restricted hostname '{hostname}' is blocked.")
+
+    # Check if hostname itself is an IP literal
+    try:
+        ip_direct = ipaddress.ip_address(hostname)
+        if ip_direct.is_private or ip_direct.is_loopback or ip_direct.is_link_local or ip_direct.is_reserved or ip_direct.is_multicast:
+            raise SSRFBlockedError(f"Target IP '{hostname}' is private/restricted and blocked.")
+        for cidr in PRIVATE_CIDRS:
+            if ip_direct in cidr:
+                raise SSRFBlockedError(f"Target IP '{hostname}' belongs to restricted network {cidr}.")
+    except ValueError:
+        pass
 
     try:
         # Resolve all IPs
@@ -65,10 +83,12 @@ def validate_url_safety(url: str) -> None:
         for family, _, _, _, sockaddr in addr_info:
             ip_str = sockaddr[0]
             ip_obj = ipaddress.ip_address(ip_str)
+            if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved or ip_obj.is_multicast:
+                raise SSRFBlockedError(f"Target '{hostname}' resolves to restricted IP {ip_str} which is blocked.")
             for cidr in PRIVATE_CIDRS:
                 if ip_obj in cidr:
-                    raise SSRFBlockedError(f"Target '{hostname}' resolves to private IP {ip_str} which is blocked.")
-    except socket.gaierror as e:
+                    raise SSRFBlockedError(f"Target '{hostname}' resolves to private IP {ip_str} in {cidr} which is blocked.")
+    except socket.gaierror:
         # DNS resolution failure will be handled downstream by HTTP client
         pass
 
@@ -89,11 +109,19 @@ class AuditResult:
 
 
 class WebsiteAuditorTool:
-    """Safe, objective technical website auditor."""
+    """Safe, objective technical website auditor with SSRF protection and redirect inspection."""
 
-    def __init__(self, crawl_delay_seconds: float = 1.0, timeout_seconds: float = 8.0):
+    MAX_REDIRECTS: int = 5
+
+    def __init__(
+        self,
+        crawl_delay_seconds: float = 1.0,
+        timeout_seconds: float = 8.0,
+        transport: Optional[httpx.AsyncBaseTransport] = None,
+    ):
         self.crawl_delay = crawl_delay_seconds
         self.timeout = timeout_seconds
+        self.transport = transport
         self._last_crawl_times: Dict[str, float] = {}
 
     async def _enforce_crawl_delay(self, domain: str) -> None:
@@ -124,50 +152,99 @@ class WebsiteAuditorTool:
         parsed = urllib.parse.urlparse(raw_url)
         domain = parsed.hostname or raw_url
 
-        # 1. SSRF Safety Check
+        # 1. SSRF Safety Check on initial URL
         try:
             validate_url_safety(raw_url)
         except SSRFBlockedError as e:
             log.warning("SSRF check blocked URL", url=raw_url, reason=str(e))
             return AuditResult(
                 has_website=True,
-                audit_findings=[f"Auditing blocked: {str(e)}"],
+                audit_findings=[f"Auditing blocked: {str(e)}", "ssrf_blocked"],
                 error_message=str(e),
             )
 
         # 2. Rate limiting / crawl delay
         await self._enforce_crawl_delay(domain)
 
-        # 3. HTTP inspection
+        # 3. HTTP inspection with manual, per-hop redirect safety validation
         headers = {
             "User-Agent": "AIAgencyBot/1.0 (+http://localhost:8000/bot; Technical Audit)",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
         }
 
-        has_ssl = raw_url.startswith("https://")
+        current_url = raw_url
+        redirect_count = 0
+        response = None
+        has_ssl = current_url.startswith("https://")
+        redirect_findings: List[str] = []
         start_time = time.perf_counter()
 
         try:
             async with httpx.AsyncClient(
                 timeout=self.timeout,
-                follow_redirects=True,
+                follow_redirects=False,
                 verify=True,
+                transport=self.transport,
             ) as client:
-                response = await client.get(raw_url, headers=headers)
+                while True:
+                    # Validate URL safety before making the request
+                    try:
+                        validate_url_safety(current_url)
+                    except SSRFBlockedError as e:
+                        log.warning("SSRF check blocked URL", url=current_url, original_url=raw_url, reason=str(e))
+                        return AuditResult(
+                            has_website=True,
+                            status_code=response.status_code if response else None,
+                            audit_findings=[f"Auditing blocked: {str(e)}", "ssrf_redirect_blocked" if redirect_count > 0 else "ssrf_blocked"],
+                            error_message=str(e),
+                        )
+
+                    response = await client.get(current_url, headers=headers)
+
+                    # Check for HTTP redirect response codes
+                    if response.status_code in (301, 302, 303, 307, 308):
+                        location = response.headers.get("location")
+                        if not location:
+                            # Redirect status without Location header — treat as terminal
+                            break
+
+                        redirect_count += 1
+                        if redirect_count > self.MAX_REDIRECTS:
+                            log.warning("Max redirects exceeded", url=raw_url, hops=redirect_count)
+                            redirect_findings.append(f"Exceeded maximum redirect limit ({self.MAX_REDIRECTS}); stopped following redirects.")
+                            break
+
+                        next_url = urllib.parse.urljoin(current_url, location)
+
+                        # Validate next URL safety BEFORE following the redirect
+                        try:
+                            validate_url_safety(next_url)
+                        except SSRFBlockedError as e:
+                            log.warning("SSRF blocked redirect hop", original_url=raw_url, redirect_url=next_url, reason=str(e))
+                            return AuditResult(
+                                has_website=True,
+                                status_code=response.status_code,
+                                audit_findings=[f"Redirect blocked for security: {str(e)}", "ssrf_redirect_blocked"],
+                                error_message=f"SSRF redirect blocked: {str(e)}",
+                            )
+
+                        current_url = next_url
+                        if current_url.startswith("https://"):
+                            has_ssl = True
+                        elif current_url.startswith("http://"):
+                            has_ssl = False
+                        continue
+                    else:
+                        break
+
                 latency_ms = int((time.perf_counter() - start_time) * 1000)
-
-                final_url = str(response.url)
-                if final_url.startswith("https://"):
-                    has_ssl = True
-                elif final_url.startswith("http://"):
-                    has_ssl = False
-
                 html = response.text or ""
                 return self._analyze_html(
                     status_code=response.status_code,
                     load_time_ms=latency_ms,
                     has_ssl=has_ssl,
                     html=html,
+                    extra_findings=redirect_findings,
                 )
 
         except httpx.HTTPStatusError as e:
@@ -210,9 +287,10 @@ class WebsiteAuditorTool:
         load_time_ms: int,
         has_ssl: bool,
         html: str,
+        extra_findings: Optional[List[str]] = None,
     ) -> AuditResult:
         """Extract objective technical indicators directly from HTML text."""
-        findings: List[str] = []
+        findings: List[str] = list(extra_findings or [])
         tech_stack: Dict[str, Any] = {}
 
         # Status code finding

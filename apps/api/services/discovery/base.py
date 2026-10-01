@@ -25,6 +25,7 @@ class DiscoveredLead:
     website_url: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    city: Optional[str] = None
     industry: Optional[str] = None
     source_type: str = "unknown"
     source_query: Optional[str] = None

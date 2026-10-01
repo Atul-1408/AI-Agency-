@@ -70,6 +70,7 @@ class LeadStatus(str, enum.Enum):
     RESEARCHING = "researching"     # Currently being audited
     RESEARCHED = "researched"       # Technical audit completed
     QUALIFIED = "qualified"         # Opportunity score >= 60
+    LOW_PRIORITY = "low_priority"   # Opportunity score 30-59
     DISQUALIFIED = "disqualified"   # Score < 30 or suppression match
     APPROVED = "approved"           # Owner approved for outreach
     REJECTED = "rejected"           # Owner rejected
@@ -182,8 +183,9 @@ class Lead(UUIDPKMixin, TimestampMixin, Base):
     __tablename__ = "leads"
 
     company_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-    domain: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    domain: Mapped[str] = mapped_column(String(255), unique=False, nullable=False, index=True)
     website_url: Mapped[Optional[str]] = mapped_column(String(1000), nullable=True)
+    google_place_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     phone: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
     email_verification_status: Mapped[EmailVerificationStatus] = mapped_column(
@@ -192,6 +194,7 @@ class Lead(UUIDPKMixin, TimestampMixin, Base):
         nullable=False,
     )
     address: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    city: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     industry: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     qualification_score: Mapped[int] = mapped_column(Integer, default=0, nullable=False, index=True)
     status: Mapped[LeadStatus] = mapped_column(
@@ -211,6 +214,24 @@ class Lead(UUIDPKMixin, TimestampMixin, Base):
     research: Mapped[Optional["LeadResearch"]] = relationship(
         back_populates="lead",
         uselist=False,
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    outreach_drafts: Mapped[list["OutreachDraft"]] = relationship(
+        "OutreachDraft",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    outreach_messages: Mapped[list["OutreachMessage"]] = relationship(
+        "OutreachMessage",
+        back_populates="lead",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    send_attempts: Mapped[list["SendAttempt"]] = relationship(
+        "SendAttempt",
+        back_populates="lead",
         cascade="all, delete-orphan",
         lazy="select",
     )
@@ -243,4 +264,51 @@ class LeadResearch(UUIDPKMixin, TimestampMixin, Base):
     research_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     lead: Mapped["Lead"] = relationship(back_populates="research")
+
+
+# ── Phase 3 Models ────────────────────────────────────────────────────────────
+
+from models.outreach import (
+    DeliveryEvent,
+    DeliveryEventType,
+    GmailAccount,
+    GmailConnectionStatus,
+    OutreachDraft,
+    OutreachDraftStatus,
+    OutreachMessage,
+    OutreachMessageStatus,
+    SendAttempt,
+    SendAttemptResult,
+    SuppressionReason,
+    SuppressionRecord,
+)
+
+__all__ = [
+    # Mixins
+    "TimestampMixin",
+    "UUIDPKMixin",
+    # Phase 1
+    "AgentRun",
+    "AgentRunStatus",
+    "ApprovalRequest",
+    "ApprovalStatus",
+    # Phase 2
+    "Lead",
+    "LeadStatus",
+    "EmailVerificationStatus",
+    "LeadResearch",
+    # Phase 3
+    "OutreachDraft",
+    "OutreachDraftStatus",
+    "GmailAccount",
+    "GmailConnectionStatus",
+    "OutreachMessage",
+    "OutreachMessageStatus",
+    "SendAttempt",
+    "SendAttemptResult",
+    "SuppressionRecord",
+    "SuppressionReason",
+    "DeliveryEvent",
+    "DeliveryEventType",
+]
 

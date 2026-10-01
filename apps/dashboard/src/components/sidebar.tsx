@@ -3,21 +3,30 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Users,
+  Home,
+  LayoutGrid,
   Mail,
-  CheckCircle,
+  CheckSquare,
   Activity,
   Settings,
-  Zap,
-  Bot,
+  Lock,
+  Check,
+  Circle,
+  Sparkles,
 } from "lucide-react";
 
-const navItems = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/leads", label: "Leads", icon: Users },
-  { href: "/dashboard/outreach", label: "Outreach", icon: Mail },
-  { href: "/dashboard/approvals", label: "Approvals", icon: CheckCircle },
+interface NavItem {
+  href: string;
+  label: string;
+  icon: typeof Home;
+  locked?: boolean;
+}
+
+const navItems: NavItem[] = [
+  { href: "/dashboard", label: "Overview", icon: Home },
+  { href: "/dashboard/leads", label: "Leads", icon: LayoutGrid },
+  { href: "/dashboard/outreach", label: "Outreach", icon: Mail, locked: true },
+  { href: "/dashboard/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/dashboard/runs", label: "Agent Runs", icon: Activity },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
 ];
@@ -27,82 +36,151 @@ export function Sidebar() {
 
   return (
     <aside
-      className="w-60 flex-shrink-0 flex flex-col border-r"
-      style={{
-        background: "var(--color-surface)",
-        borderColor: "var(--color-border)",
-      }}
+      className="w-[260px] flex-shrink-0 flex flex-col bg-[#111013] border-r border-[#242126] h-screen select-none relative z-20 overflow-y-auto overflow-x-hidden scrollbar-none"
+      style={{ padding: "20px 14px" }}
     >
-      {/* Logo */}
-      <div
-        className="flex items-center gap-3 px-5 py-5 border-b"
-        style={{ borderColor: "var(--color-border)" }}
-      >
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center"
-          style={{ background: "var(--color-accent)" }}
-        >
-          <Bot size={16} className="text-white" />
+      {/* 9. Logo Area */}
+      <div className="flex items-center gap-3.5 pb-2">
+        {/* 44px x 44px Icon Container with 12px radius */}
+        <div className="w-[44px] h-[44px] rounded-[12px] bg-gradient-to-br from-[#F5CC7A] via-[#E8B968] to-[#A87932] flex items-center justify-center flex-shrink-0 shadow-[0_0_16px_rgba(232,185,105,0.22)] border border-[#F5CC7A]/40">
+          <Sparkles className="w-5 h-5 text-[#17130D]" />
         </div>
         <div>
-          <p className="text-sm font-semibold leading-none">AI Agency</p>
-          <p className="text-xs mt-0.5" style={{ color: "var(--color-muted)" }}>
+          <h2 className="text-[18px] font-semibold text-[#F5F1EA] tracking-tight leading-tight">
+            AI Agency
+          </h2>
+          <p className="text-[12px] text-[#77717C] font-normal leading-none mt-1">
             Owner Dashboard
           </p>
         </div>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 p-3 space-y-0.5">
-        {navItems.map(({ href, label, icon: Icon }) => {
+      {/* Spacing between logo and navigation: 28-32px */}
+      <div className="h-[28px] flex-shrink-0" />
+
+      {/* 10. Navigation Items */}
+      <nav className="flex flex-col gap-[6px]">
+        {navItems.map((item) => {
+          const { href, label, icon: Icon, locked } = item;
           const active =
             href === "/dashboard"
               ? pathname === "/dashboard"
               : pathname.startsWith(href);
+
+          if (locked) {
+            return (
+              <div
+                key={href}
+                className="h-[44px] px-[14px] rounded-[10px] flex items-center justify-between text-[14px] text-[#77717C] opacity-75 cursor-not-allowed select-none"
+                title="Phase 3: Outreach (Upcoming — locked)"
+              >
+                <div className="flex items-center gap-[10px]">
+                  <Icon size={18} className="text-[#77717C]" />
+                  <span>{label}</span>
+                </div>
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[#171519] border border-[#242126] text-[10px] font-mono text-[#77717C]">
+                  <span>Phase 3</span>
+                  <Lock size={10} />
+                </div>
+              </div>
+            );
+          }
+
           return (
             <Link
               key={href}
               href={href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-150"
-              style={{
-                color: active ? "white" : "var(--color-muted)",
-                background: active
-                  ? "rgba(99, 102, 241, 0.15)"
-                  : "transparent",
-                borderLeft: active
-                  ? "2px solid var(--color-accent)"
-                  : "2px solid transparent",
-              }}
+              className={`h-[44px] px-[14px] rounded-[10px] flex items-center justify-between text-[14px] transition-all duration-180 relative ${
+                active
+                  ? "bg-[rgba(232,185,105,0.12)] text-[#F5F1EA] font-semibold"
+                  : "text-[#B7AFBA] hover:text-[#F5F1EA] hover:bg-[#171519]"
+              }`}
             >
-              <Icon size={16} />
-              {label}
+              {/* 2px gold accent line for active item */}
+              {active && (
+                <span className="absolute left-0 top-[8px] bottom-[8px] w-[2px] bg-[#E8B968] rounded-r" />
+              )}
+              <div className="flex items-center gap-[10px]">
+                <Icon
+                  size={18}
+                  className={active ? "text-[#E8B968]" : "text-[#B7AFBA]"}
+                />
+                <span>{label}</span>
+              </div>
             </Link>
           );
         })}
       </nav>
 
-      {/* Phase indicator */}
-      <div
-        className="m-3 p-3 rounded-lg"
-        style={{ background: "var(--color-surface-2)" }}
-      >
-        <div className="flex items-center gap-2 mb-1">
-          <Zap size={12} style={{ color: "var(--color-accent)" }} />
-          <span className="text-xs font-semibold" style={{ color: "var(--color-accent)" }}>
-            Phase 1 — Foundation
-          </span>
-        </div>
-        <p className="text-xs" style={{ color: "var(--color-muted)" }}>
-          10 phases to full autonomy
-        </p>
-        <div
-          className="mt-2 h-1.5 rounded-full overflow-hidden"
-          style={{ background: "var(--color-border)" }}
-        >
-          <div
-            className="h-full rounded-full"
-            style={{ width: "10%", background: "var(--color-accent)" }}
-          />
+      {/* Flexible Spacer */}
+      <div className="flex-1 min-h-[24px]" />
+
+      {/* 23. Phase Progress Sidebar Card with Grand Mountain Background */}
+      <div className="relative rounded-[16px] overflow-hidden border border-[#302A30] shadow-2xl group select-none">
+        {/* Full-bleed Mountain Background */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/sidebar-mountain.jpg"
+          alt="Alpine Horizon"
+          className="absolute inset-0 w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-700 ease-out pointer-events-none"
+        />
+        {/* Cinematic dark luxury gradient overlay */}
+        <div className="absolute inset-0 bg-gradient-to-b from-[#111013]/60 via-[#111013]/75 to-[#0B0A0C]/92 pointer-events-none" />
+        <div className="absolute inset-0 ring-1 ring-inset ring-white/10 rounded-[16px] pointer-events-none" />
+
+        {/* Card Content Layer */}
+        <div className="relative z-10 p-[18px]">
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-[13px] font-semibold text-[#F5F1EA] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+              Phase Progress
+            </span>
+            <span className="text-[12px] font-bold text-[#E8B968] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+              2 / 8
+            </span>
+          </div>
+
+          {/* 6px Gold Progress Bar */}
+          <div className="h-[6px] rounded-full overflow-hidden bg-black/40 backdrop-blur-md mb-4 border border-white/10">
+            <div
+              className="h-full rounded-full transition-all duration-300 bg-gradient-to-r from-[#A87932] via-[#E8B968] to-[#F5CC7A] shadow-[0_0_10px_rgba(232,185,105,0.4)]"
+              style={{ width: "25%" }}
+            />
+          </div>
+
+          {/* Checklist: min 40px height per item */}
+          <div className="space-y-1 text-[13px]">
+            <div className="min-h-[40px] flex items-center justify-between py-1 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#39C98A]/25 border border-[#39C98A]/50 flex items-center justify-center text-[#39C98A] shadow-sm">
+                  <Check size={11} strokeWidth={3} />
+                </span>
+                <span className="text-[#F5F1EA] font-medium drop-shadow-sm">Phase 1</span>
+              </div>
+              <span className="text-[12px] text-[#B7AFBA]">Foundation</span>
+            </div>
+
+            <div className="min-h-[40px] flex items-center justify-between py-1 border-b border-white/10">
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full bg-[#39C98A]/25 border border-[#39C98A]/50 flex items-center justify-center text-[#39C98A] shadow-sm">
+                  <Check size={11} strokeWidth={3} />
+                </span>
+                <span className="text-[#F5F1EA] font-medium drop-shadow-sm">Phase 2</span>
+              </div>
+              <span className="text-[12px] text-[#B7AFBA]">Lead Research</span>
+            </div>
+
+            <div className="min-h-[40px] flex items-center justify-between py-1">
+              <div className="flex items-center gap-2.5">
+                <span className="w-5 h-5 rounded-full border border-white/20 bg-black/30 flex items-center justify-center text-[#77717C]">
+                  <Circle size={8} />
+                </span>
+                <span className="text-[#B7AFBA]">Phase 3</span>
+              </div>
+              <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-black/50 border border-white/10 text-[#77717C] backdrop-blur-md">
+                Upcoming
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </aside>

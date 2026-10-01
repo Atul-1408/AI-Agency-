@@ -135,10 +135,12 @@ class LeadResponse(BaseModel):
     company_name: str
     domain: str
     website_url: Optional[str]
+    google_place_id: Optional[str] = None
     phone: Optional[str]
     email: Optional[str]
     email_verification_status: EmailVerificationStatus
     address: Optional[str]
+    city: Optional[str] = None
     industry: Optional[str]
     qualification_score: int
     status: LeadStatus
@@ -166,10 +168,55 @@ class ManualLeadCreateRequest(BaseModel):
     domain: Optional[str] = Field(default=None, description="Domain name (auto-derived if omitted)")
     phone: Optional[str] = Field(default=None, description="Public phone number")
     address: Optional[str] = Field(default=None, description="Business address")
+    city: Optional[str] = Field(default=None, description="City or locality")
     industry: Optional[str] = Field(default=None, description="Industry/category")
     notes: Optional[str] = Field(default=None, description="Owner notes")
 
 
 class LeadRejectRequest(BaseModel):
     reason: Optional[str] = Field(default=None, description="Reason for rejecting the lead")
+
+
+# ── Phase 3 Schemas ───────────────────────────────────────────────────────────
+
+from schemas.outreach import (
+    DeliveryEventResponse,
+    GmailAccountCreate,
+    GmailAccountResponse,
+    OutreachDraftCreate,
+    OutreachDraftResponse,
+    OutreachMessageResponse,
+    SendAttemptResponse,
+    SuppressionRecordCreate,
+    SuppressionRecordResponse,
+)
+
+__all__ = [
+    # Shared
+    "PaginatedResponse",
+    # Auth
+    "LoginRequest",
+    "TokenResponse",
+    # Phase 1
+    "TriggerAgentRequest",
+    "AgentRunResponse",
+    "ReviewApprovalRequest",
+    "ApprovalRequestResponse",
+    # Phase 2
+    "LeadResponse",
+    "LeadResearchResponse",
+    "DiscoverLeadsRequest",
+    "ManualLeadCreateRequest",
+    "LeadRejectRequest",
+    # Phase 3
+    "OutreachDraftCreate",
+    "OutreachDraftResponse",
+    "GmailAccountCreate",
+    "GmailAccountResponse",
+    "OutreachMessageResponse",
+    "SendAttemptResponse",
+    "SuppressionRecordCreate",
+    "SuppressionRecordResponse",
+    "DeliveryEventResponse",
+]
 

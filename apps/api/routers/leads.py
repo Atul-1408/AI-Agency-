@@ -89,6 +89,7 @@ async def discover_leads(
             run.completed_at = datetime.now(timezone.utc)
 
     await db.flush()
+    await db.refresh(run)
     return AgentRunResponse.model_validate(run)
 
 
@@ -104,12 +105,21 @@ async def create_manual_lead(
     raw_domain = request.domain or (normalize_domain(request.website_url) if request.website_url else "")
     domain = normalize_domain(raw_domain) or f"manual-{request.company_name.lower().replace(' ', '-')[:25]}.local"
 
+    from services.lead_service import extract_city_from_address
+    city = request.city or extract_city_from_address(request.address)
+
     lead_service = LeadService(db)
-    is_dup, existing = await lead_service.is_duplicate(domain, request.phone)
+    is_dup, existing = await lead_service.is_duplicate(
+        domain=domain,
+        phone=request.phone,
+        company_name=request.company_name,
+        address=request.address,
+        city=city,
+    )
     if is_dup and existing:
         raise HTTPException(
             status_code=400,
-            detail=f"Lead with domain '{domain}' or phone already exists (Lead ID: {existing.id})",
+            detail=f"Lead with domain '{domain}', phone, or location already exists (Lead ID: {existing.id})",
         )
 
     # Technical audit
@@ -134,11 +144,12 @@ async def create_manual_lead(
         website_url=request.website_url,
         phone=request.phone,
         address=request.address,
+        city=city,
         industry=request.industry,
         source_type="manual_entry",
         source_query="manual",
         source_url=request.website_url,
-        raw_data={"notes": request.notes},
+        raw_data={"notes": request.notes, "city": city},
     )
 
     saved_lead, _ = await lead_service.save_researched_lead(disc, audit, contact, evaluation)
@@ -256,7 +267,9 @@ async def requalify_lead(
         lead.research.research_notes = evaluation.qualification_notes
 
     await db.commit()
-    return LeadResponse.model_validate(lead)
+    stmt = select(Lead).options(selectinload(Lead.research)).where(Lead.id == lead_id)
+    res = await db.execute(stmt)
+    return LeadResponse.model_validate(res.scalar_one())
 
 
 @router.post("/{lead_id}/approve", response_model=LeadResponse)

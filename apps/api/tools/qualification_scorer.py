@@ -148,14 +148,12 @@ class QualificationScorerTool:
         final_score = max(0, min(100, score))
 
         # Assign status tier
-        if final_score >= 60:
-            status = LeadStatus.QUALIFIED
+        status = self.status_for_score(final_score)
+        if status == LeadStatus.QUALIFIED:
             notes = f"Qualified opportunity (Score: {final_score}/100). Technical issues identified with high outreach viability."
-        elif final_score >= 30:
-            status = LeadStatus.RESEARCHED
-            notes = f"Moderate/low priority opportunity (Score: {final_score}/100)."
+        elif status == LeadStatus.LOW_PRIORITY:
+            notes = f"Low priority opportunity (Score: {final_score}/100)."
         else:
-            status = LeadStatus.DISQUALIFIED
             notes = f"Disqualified (Score: {final_score}/100). Insufficient opportunity or lack of contact reachability."
 
         return QualificationEvaluation(
@@ -164,3 +162,12 @@ class QualificationScorerTool:
             scoring_breakdown=breakdown,
             qualification_notes=notes,
         )
+
+    @staticmethod
+    def status_for_score(score: int) -> LeadStatus:
+        """Deterministic mapping from opportunity score to LeadStatus."""
+        if score >= 60:
+            return LeadStatus.QUALIFIED
+        elif score >= 30:
+            return LeadStatus.LOW_PRIORITY
+        return LeadStatus.DISQUALIFIED

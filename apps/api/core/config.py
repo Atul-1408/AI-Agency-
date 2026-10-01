@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     GMAIL_CLIENT_ID: str = ""
     GMAIL_CLIENT_SECRET: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
+    GOOGLE_PLACES_API_KEY: str = ""
     GITHUB_TOKEN: str = ""
     VERCEL_TOKEN: str = ""
 
@@ -63,6 +64,11 @@ class Settings(BaseSettings):
     MAX_EMAILS_PER_DAY: int = 50
     MAX_EMAILS_PER_CAMPAIGN: int = 200
     EMAIL_COOLDOWN_HOURS: int = 72
+
+    # ── Phase 3 Approved Outreach Policies ───────────────────
+    MAX_DAILY_SENDS: int = 30
+    MAX_NEW_LEADS_PER_DAY: int = 20
+    DOMAIN_PACING_SECONDS: int = 120
 
     @property
     def is_production(self) -> bool:
