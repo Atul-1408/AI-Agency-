@@ -10,6 +10,11 @@ from services.personalization_engine import (
     extract_factual_observations,
     sanitize_text,
 )
+from services.safety_controller import (
+    CircuitBreaker,
+    SafetyCheckResult,
+    SafetyController,
+)
 
 __all__ = [
     "LeadService",
@@ -21,4 +26,7 @@ __all__ = [
     "PromptInjectionDetected",
     "sanitize_text",
     "extract_factual_observations",
+    "CircuitBreaker",
+    "SafetyController",
+    "SafetyCheckResult",
 ]

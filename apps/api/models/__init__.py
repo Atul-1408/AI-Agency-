@@ -269,6 +269,7 @@ class LeadResearch(UUIDPKMixin, TimestampMixin, Base):
 # ── Phase 3 Models ────────────────────────────────────────────────────────────
 
 from models.outreach import (
+    CircuitBreakerState,
     DeliveryEvent,
     DeliveryEventType,
     GmailAccount,
@@ -298,6 +299,7 @@ __all__ = [
     "EmailVerificationStatus",
     "LeadResearch",
     # Phase 3
+    "CircuitBreakerState",
     "OutreachDraft",
     "OutreachDraftStatus",
     "GmailAccount",

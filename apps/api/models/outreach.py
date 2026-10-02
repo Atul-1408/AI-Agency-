@@ -53,6 +53,14 @@ class OutreachDraftStatus(str, enum.Enum):
     SUPPRESSED = "suppressed"
 
 
+class CircuitBreakerState(str, enum.Enum):
+    """Operational states of the outreach delivery circuit breaker."""
+    NORMAL = "NORMAL"
+    WARNING = "WARNING"
+    THROTTLED = "THROTTLED"
+    PAUSED = "PAUSED"
+
+
 class GmailConnectionStatus(str, enum.Enum):
     """Health & connection states of the owner's linked Gmail account."""
     CONNECTED = "connected"
