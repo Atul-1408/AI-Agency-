@@ -25,7 +25,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/leads", label: "Leads", icon: LayoutGrid },
-  { href: "/dashboard/outreach", label: "Outreach", icon: Mail, locked: true },
+  { href: "/dashboard/outreach", label: "Outreach", icon: Mail },
   { href: "/dashboard/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/dashboard/runs", label: "Agent Runs", icon: Activity },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
@@ -171,13 +171,13 @@ export function Sidebar() {
 
             <div className="min-h-[40px] flex items-center justify-between py-1">
               <div className="flex items-center gap-2.5">
-                <span className="w-5 h-5 rounded-full border border-white/20 bg-black/30 flex items-center justify-center text-[#77717C]">
-                  <Circle size={8} />
+                <span className="w-5 h-5 rounded-full bg-[#E8B968]/20 border border-[#E8B968]/50 flex items-center justify-center text-[#E8B968] shadow-sm">
+                  <Sparkles size={11} />
                 </span>
-                <span className="text-[#B7AFBA]">Phase 3</span>
+                <span className="text-[#F5F1EA] font-medium drop-shadow-sm">Phase 3</span>
               </div>
-              <span className="text-[11px] font-medium px-2 py-0.5 rounded bg-black/50 border border-white/10 text-[#77717C] backdrop-blur-md">
-                Upcoming
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded bg-[#E8B968]/15 border border-[#E8B968]/30 text-[#E8B968]">
+                Gate 2 Review
               </span>
             </div>
           </div>

@@ -42,6 +42,34 @@ export type EmailVerificationStatus =
   | "mx_verified"
   | "unreachable";
 
+export type OutreachDraftStatus =
+  | "drafted"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "sent"
+  | "suppressed";
+
+export interface OutreachDraft {
+  id: string;
+  lead_id: string;
+  company_name?: string | null;
+  lead_domain?: string | null;
+  recipient_email: string;
+  subject: string;
+  body_text: string;
+  body_html?: string | null;
+  evidence?: Record<string, unknown> | null;
+  status: OutreachDraftStatus;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface LeadResearch {
   id: string;
   lead_id: string;
@@ -345,5 +373,55 @@ export const api = {
 
     requalify: (id: string) =>
       apiFetch<Lead>(`/api/v1/leads/${id}/qualify`, { method: "POST" }),
+  },
+
+  // Outreach (Phase 3 Gate 2)
+  outreach: {
+    listDrafts: async (params?: {
+      page?: number;
+      page_size?: number;
+      status?: string;
+      lead_id?: string;
+      recipient_email?: string;
+      created_after?: string;
+      created_before?: string;
+    }): Promise<PaginatedResponse<OutreachDraft>> => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {})
+          .filter(([, v]) => v !== undefined && v !== "" && v !== "all")
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return await apiFetch<PaginatedResponse<OutreachDraft>>(
+        `/api/v1/outreach/drafts${qs ? `?${qs}` : ""}`
+      );
+    },
+
+    getDraft: (id: string) =>
+      apiFetch<OutreachDraft>(`/api/v1/outreach/drafts/${id}`),
+
+    approveDraft: (id: string) =>
+      apiFetch<OutreachDraft>(`/api/v1/outreach/drafts/${id}/approve`, {
+        method: "POST",
+      }),
+
+    rejectDraft: (id: string, reason: string) =>
+      apiFetch<OutreachDraft>(`/api/v1/outreach/drafts/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+
+    editDraft: (
+      id: string,
+      payload: { subject?: string; body_text?: string; body_html?: string }
+    ) =>
+      apiFetch<OutreachDraft>(`/api/v1/outreach/drafts/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+
+    resetDraft: (id: string) =>
+      apiFetch<OutreachDraft>(`/api/v1/outreach/drafts/${id}/reset`, {
+        method: "POST",
+      }),
   },
 };
