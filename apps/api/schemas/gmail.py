@@ -7,6 +7,7 @@ NEVER define fields for:
 - access_token
 - client_secret
 - authorization_code
+- encryption_key
 These must NEVER be serialized or returned in any API responses.
 """
 from __future__ import annotations
@@ -32,8 +33,10 @@ class GmailStatusResponse(BaseModel):
 
     connected: bool = Field(..., description="Whether a Gmail account is actively connected and usable")
     email: Optional[str] = Field(None, description="Linked Google account email address")
-    connection_status: str = Field(..., description="Connection status: CONNECTED, DISCONNECTED, or UNHEALTHY")
+    connection_status: str = Field(..., description="Connection status: CONNECTED, DISCONNECTED, or ERROR")
     last_health_check: Optional[datetime] = Field(None, description="Timestamp of the most recent health check")
+    last_error_at: Optional[datetime] = Field(None, description="Timestamp of the most recent health check error")
+    last_error_code: Optional[str] = Field(None, description="Machine-readable error classification code if unhealthy")
     scopes: List[str] = Field(default_factory=list, description="Authorized minimum OAuth scopes")
 
 
@@ -45,8 +48,9 @@ class GmailDisconnectResponse(BaseModel):
 
 class GmailHealthCheckResponse(BaseModel):
     """Response returned upon triggering a Gmail account health check."""
-    status: str = Field(..., description="Health status: CONNECTED, DISCONNECTED, or UNHEALTHY")
+    status: str = Field(..., description="Health status: CONNECTED, DISCONNECTED, or ERROR")
     email: Optional[str] = Field(None, description="Google account email")
     last_health_check: datetime = Field(..., description="Timestamp of completed check")
     is_healthy: bool = Field(..., description="Whether the connection is healthy")
+    error_code: Optional[str] = Field(None, description="Classification of failure if unhealthy")
     message: str = Field(..., description="Summary of health assessment")

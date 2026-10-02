@@ -6,17 +6,17 @@ Endpoints:
 - GET  /api/v1/gmail/callback     -> Validate OAuth state, exchange code, encrypt and persist credentials
 - GET  /api/v1/gmail/status       -> Query current Gmail connection and health status
 - POST /api/v1/gmail/disconnect   -> Disconnect Gmail, invalidate token, and revoke credentials
-- POST /api/v1/gmail/health-check -> Evaluate Gmail connectivity status
+- POST /api/v1/gmail/health-check -> Evaluate Gmail connectivity status with rate limit protection
 
 SECURITY MANDATES:
 - Only authenticated agency owners may access or manage Gmail connections.
-- OAuth state tokens are signed, expiring (10m TTL), and bound to the authenticated owner.
+- OAuth state tokens are signed, expiring (10m TTL), bound to owner, and replay protected via ConsumedOAuthState.
 - Refresh tokens are NEVER logged, returned in responses, or stored in plaintext.
-- No email sending or inbox reading permissions.
+- No email sending, message dispatch, or inbox reading permissions.
 """
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,7 +28,7 @@ import structlog
 from core.config import settings
 from core.database import get_db
 from models import AgentRun, AgentRunStatus
-from models.outreach import GmailAccount, GmailConnectionStatus
+from models.outreach import ConsumedOAuthState, GmailAccount, GmailConnectionStatus
 from routers.auth import decode_token, require_owner
 from schemas.gmail import (
     GmailConnectResponse,
@@ -36,6 +36,7 @@ from schemas.gmail import (
     GmailHealthCheckResponse,
     GmailStatusResponse,
 )
+from services.gmail_credential_service import GmailCredentialService, HealthAssessmentResult
 from services.gmail_oauth_service import (
     GmailOAuthConfigError,
     GmailOAuthError,
@@ -93,7 +94,7 @@ async def log_gmail_audit(
     now = datetime.now(timezone.utc)
     forbidden_keys = {
         "token", "refresh_token", "access_token", "client_secret",
-        "code", "authorization_code", "encrypted_refresh_token"
+        "code", "authorization_code", "encrypted_refresh_token", "key"
     }
 
     def _sanitize(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -170,12 +171,13 @@ async def gmail_callback(
 ) -> GmailStatusResponse:
     """
     Process Google OAuth 2.0 callback:
-    1. Validate state integrity, expiration, and owner binding.
-    2. Prevent CSRF and state manipulation.
+    1. Validate state integrity, expiration, purpose, and owner binding.
+    2. Prevent CSRF and state replay attacks via ConsumedOAuthState store.
     3. Exchange authorization code for tokens.
     4. Retrieve verified Google email identity.
-    5. Encrypt refresh token using AES-256-GCM.
-    6. Persist GmailAccount record.
+    5. Verify Google account is not conflicting with another agency account.
+    6. Encrypt refresh token using AES-256-GCM.
+    7. Persist GmailAccount record as CONNECTED.
     """
     oauth_service = GmailOAuthService()
     encryption_service = TokenEncryptionService()
@@ -196,7 +198,7 @@ async def gmail_callback(
             detail=f"Google OAuth authorization failed: {error}",
         )
 
-    # Validate state parameter
+    # Validate state parameter presence
     if not state:
         await log_gmail_audit(
             db=db,
@@ -212,7 +214,7 @@ async def gmail_callback(
         )
 
     try:
-        state_owner = oauth_service.validate_state(state, expected_owner_email=caller_owner)
+        claims = oauth_service.validate_and_decode_state(state, expected_owner_email=caller_owner)
     except OAuthStateInvalidError as exc:
         log.warning("OAuth state validation failed", error=str(exc))
         await log_gmail_audit(
@@ -228,8 +230,43 @@ async def gmail_callback(
             detail=str(exc),
         ) from exc
 
+    state_owner = claims["sub"]
+    jti = claims.get("jti")
+
     # Enforce IDOR protection on bound state owner
     verify_owner_access(state_owner)
+
+    # ── State Replay Protection ───────────────────────────────────────────────
+    if not jti:
+        log.warning("OAuth state missing jti identifier", owner=state_owner)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth state missing replay protection token",
+        )
+
+    already_consumed = await db.scalar(
+        select(ConsumedOAuthState).where(ConsumedOAuthState.jti == jti)
+    )
+    if already_consumed:
+        log.warning("OAuth state replay detected", jti=jti, owner=state_owner)
+        await log_gmail_audit(
+            db=db,
+            action="oauth_callback_failure",
+            owner_email=state_owner,
+            status=AgentRunStatus.FAILED,
+            error_message="OAuth state already consumed (replay attack detected)",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth state has already been consumed (replay attack detected).",
+        )
+
+    # Mark state as consumed in DB
+    exp_ts = claims.get("exp")
+    exp_dt = datetime.fromtimestamp(exp_ts, tz=timezone.utc) if exp_ts else (datetime.now(timezone.utc) + timedelta(minutes=10))
+    db.add(ConsumedOAuthState(jti=jti, owner_id=state_owner, expires_at=exp_dt))
+    await db.flush()
 
     if not code:
         await log_gmail_audit(
@@ -299,13 +336,34 @@ async def gmail_callback(
             detail=f"Failed to verify Google account identity: {str(exc)}",
         ) from exc
 
+    # Check for Google account collision with another owner
+    conflicting_account = await db.scalar(
+        select(GmailAccount).where(
+            GmailAccount.google_email == google_email,
+            GmailAccount.owner_id != state_owner,
+        )
+    )
+    if conflicting_account:
+        log.warning("Google account already connected to another owner", google_email=google_email)
+        await log_gmail_audit(
+            db=db,
+            action="oauth_callback_failure",
+            owner_email=state_owner,
+            status=AgentRunStatus.FAILED,
+            error_message=f"Google account {google_email} is already linked to another owner",
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This Google account is already linked to another agency owner.",
+        )
+
     # Fetch existing account or check for existing refresh token
     existing_account = await db.scalar(
         select(GmailAccount).where(GmailAccount.owner_id == state_owner)
     )
 
     if not refresh_token:
-        # If Google didn't return a new refresh token, we can only reuse if an existing one exists
         if existing_account and existing_account.encrypted_refresh_token:
             encrypted_refresh_token = existing_account.encrypted_refresh_token
         else:
@@ -351,6 +409,8 @@ async def gmail_callback(
             token_created_at=now,
             last_token_refresh_at=now,
             last_health_check=now,
+            last_error_at=None,
+            last_error_code=None,
         )
         db.add(account)
     else:
@@ -360,6 +420,8 @@ async def gmail_callback(
         account.connection_status = GmailConnectionStatus.CONNECTED
         account.last_token_refresh_at = now
         account.last_health_check = now
+        account.last_error_at = None
+        account.last_error_code = None
 
     # Record successful callback & connection audit entries
     await log_gmail_audit(
@@ -383,6 +445,8 @@ async def gmail_callback(
         email=account.google_email,
         connection_status="CONNECTED",
         last_health_check=account.last_health_check,
+        last_error_at=account.last_error_at,
+        last_error_code=account.last_error_code,
         scopes=SAFE_SCOPE_LABELS,
     )
 
@@ -396,7 +460,7 @@ async def get_gmail_status(
 ) -> GmailStatusResponse:
     """
     Get the safe connection status and metadata for the authenticated owner's Gmail account.
-    NEVER returns refresh tokens, access tokens, or client secrets.
+    NEVER returns refresh tokens, access tokens, client secrets, or encryption keys.
     """
     verify_owner_access(owner_email)
 
@@ -410,6 +474,8 @@ async def get_gmail_status(
             email=account.google_email if account else None,
             connection_status="DISCONNECTED",
             last_health_check=account.last_health_check if account else None,
+            last_error_at=account.last_error_at if account else None,
+            last_error_code=account.last_error_code if account else None,
             scopes=[],
         )
 
@@ -419,15 +485,19 @@ async def get_gmail_status(
             email=account.google_email,
             connection_status="CONNECTED",
             last_health_check=account.last_health_check,
+            last_error_at=account.last_error_at,
+            last_error_code=account.last_error_code,
             scopes=SAFE_SCOPE_LABELS,
         )
 
-    # UNHEALTHY / ERROR state
+    # ERROR state
     return GmailStatusResponse(
         connected=False,
         email=account.google_email,
-        connection_status="UNHEALTHY",
+        connection_status="ERROR",
         last_health_check=account.last_health_check,
+        last_error_at=account.last_error_at,
+        last_error_code=account.last_error_code,
         scopes=[],
     )
 
@@ -442,7 +512,7 @@ async def disconnect_gmail(
     """
     Disconnect linked Gmail account:
     1. Revokes Google credentials if possible.
-    2. Overwrites / clears stored encrypted refresh token.
+    2. Purges stored encrypted refresh token.
     3. Sets status to DISCONNECTED.
     4. Audits the action in agent_runs.
     """
@@ -461,7 +531,7 @@ async def disconnect_gmail(
     oauth_service = GmailOAuthService()
     encryption_service = TokenEncryptionService()
 
-    # Attempt to revoke token with Google
+    # Attempt to revoke token with Google (gracefully tolerate network/revocation failures)
     if account.encrypted_refresh_token:
         try:
             token = encryption_service.decrypt(account.encrypted_refresh_token)
@@ -473,6 +543,8 @@ async def disconnect_gmail(
     account.encrypted_refresh_token = ""
     account.connection_status = GmailConnectionStatus.DISCONNECTED
     account.last_health_check = datetime.now(timezone.utc)
+    account.last_error_at = None
+    account.last_error_code = None
 
     # Audit the disconnection
     await log_gmail_audit(
@@ -494,12 +566,14 @@ async def disconnect_gmail(
 
 @router.post("/health-check", response_model=GmailHealthCheckResponse)
 async def check_gmail_health(
+    force: bool = Query(False, description="Bypass the 10-second health check rate limit"),
     owner_email: str = Depends(require_owner),
     db: AsyncSession = Depends(get_db),
 ) -> GmailHealthCheckResponse:
     """
     Evaluate the health of the authenticated owner's connected Gmail account.
     Validates token decryption and refreshes token status against Google.
+    Enforces a 10-second rate limit to prevent hammering Google servers.
     Does NOT send emails or access user messages.
     """
     verify_owner_access(owner_email)
@@ -515,25 +589,56 @@ async def check_gmail_health(
             email=account.google_email if account else None,
             last_health_check=now,
             is_healthy=False,
+            error_code="DISCONNECTED",
             message="Gmail account is not connected",
         )
 
-    oauth_service = GmailOAuthService()
-    new_status = await oauth_service.check_account_health(account)
-    account.connection_status = new_status
+    # Rate limiting: prevent hammering Google OAuth endpoints
+    if not force and account.last_health_check:
+        last_check = account.last_health_check
+        if last_check.tzinfo is None:
+            last_check = last_check.replace(tzinfo=timezone.utc)
+        elapsed_seconds = (now - last_check).total_seconds()
+        if elapsed_seconds < 10.0:
+            log.warning("Health check rate limit hit", owner=owner_email, elapsed=elapsed_seconds)
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Health check rate limit exceeded. Please wait 10 seconds between checks.",
+            )
+
+    credential_service = GmailCredentialService()
+    assessment: HealthAssessmentResult = await credential_service.verify_credential_health(account)
+
+    # Update account state
+    account.connection_status = assessment.status
     account.last_health_check = now
 
-    is_healthy = (new_status == GmailConnectionStatus.CONNECTED)
-    status_label = "CONNECTED" if is_healthy else ("DISCONNECTED" if new_status == GmailConnectionStatus.DISCONNECTED else "UNHEALTHY")
+    status_label = assessment.status.name  # "CONNECTED", "DISCONNECTED", "ERROR"
 
-    if not is_healthy:
+    if assessment.is_healthy:
+        account.last_error_at = None
+        account.last_error_code = None
+        await log_gmail_audit(
+            db=db,
+            action="gmail_health_success",
+            owner_email=owner_email,
+            status=AgentRunStatus.COMPLETED,
+            input_data={"google_email": account.google_email},
+        )
+    else:
+        account.last_error_at = now
+        account.last_error_code = assessment.error_code
         await log_gmail_audit(
             db=db,
             action="gmail_health_failure",
             owner_email=owner_email,
             status=AgentRunStatus.FAILED,
-            error_message=f"Gmail health check assessed account as {status_label}",
-            input_data={"google_email": account.google_email, "assessed_status": status_label},
+            error_message=assessment.error_detail or f"Gmail health check assessed account as {status_label}",
+            input_data={
+                "google_email": account.google_email,
+                "error_code": assessment.error_code,
+                "assessed_status": status_label,
+            },
         )
     await db.commit()
 
@@ -541,6 +646,7 @@ async def check_gmail_health(
         status=status_label,
         email=account.google_email,
         last_health_check=now,
-        is_healthy=is_healthy,
-        message=f"Gmail account health evaluated: {status_label}",
+        is_healthy=assessment.is_healthy,
+        error_code=assessment.error_code,
+        message=assessment.error_detail or f"Gmail account health evaluated: {status_label}",
     )

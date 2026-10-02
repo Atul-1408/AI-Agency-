@@ -270,6 +270,7 @@ class LeadResearch(UUIDPKMixin, TimestampMixin, Base):
 
 from models.outreach import (
     CircuitBreakerState,
+    ConsumedOAuthState,
     DeliveryEvent,
     DeliveryEventType,
     GmailAccount,
@@ -312,5 +313,7 @@ __all__ = [
     "SuppressionReason",
     "DeliveryEvent",
     "DeliveryEventType",
+    # Phase 4
+    "ConsumedOAuthState",
 ]
 

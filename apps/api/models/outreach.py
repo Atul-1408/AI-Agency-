@@ -179,6 +179,12 @@ class GmailAccount(UUIDPKMixin, TimestampMixin, Base):
     last_health_check: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    last_error_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_error_code: Mapped[Optional[str]] = mapped_column(
+        String(100), nullable=True
+    )
 
 
 class OutreachMessage(UUIDPKMixin, TimestampMixin, Base):
@@ -333,3 +339,23 @@ class DeliveryEvent(UUIDPKMixin, Base):
     outreach_message: Mapped["OutreachMessage"] = relationship(
         back_populates="delivery_events"
     )
+
+
+class ConsumedOAuthState(UUIDPKMixin, Base):
+    """
+    OAuth State Replay Protection Store.
+    
+    Tracks consumed OAuth state identifiers (jti) to prevent state replay attacks.
+    Tokens expire in 10 minutes and can strictly be consumed only once.
+    """
+    __tablename__ = "consumed_oauth_states"
+
+    jti: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    owner_id: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    consumed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+

@@ -115,16 +115,19 @@ class GmailOAuthService:
         payload = {
             "sub": owner_email.strip().lower(),
             "nonce": secrets.token_urlsafe(16),
+            "jti": secrets.token_urlsafe(16),
             "purpose": "gmail_oauth_state",
             "iat": int(now.timestamp()),
             "exp": int((now + timedelta(minutes=10)).timestamp()),
         }
         return jwt.encode(payload, settings.APP_SECRET, algorithm="HS256")
 
-    def validate_state(self, state: str, expected_owner_email: Optional[str] = None) -> str:
+    def validate_and_decode_state(
+        self, state: str, expected_owner_email: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Validate state token integrity, expiration, purpose, and owner binding.
-        Returns the bound owner email from the verified state claims.
+        Returns the verified JWT payload claims dict.
         """
         if not state or not state.strip():
             raise OAuthStateInvalidError("Missing OAuth state parameter.")
@@ -155,7 +158,14 @@ class GmailOAuthService:
                     "OAuth state owner mismatch: state was not issued to the authenticated owner."
                 )
 
-        return state_owner
+        return payload
+
+    def validate_state(self, state: str, expected_owner_email: Optional[str] = None) -> str:
+        """
+        Validate state token and return the bound owner email string.
+        """
+        payload = self.validate_and_decode_state(state, expected_owner_email=expected_owner_email)
+        return payload["sub"]
 
     def get_authorization_url(self, owner_email: str) -> Dict[str, str]:
         """
@@ -262,60 +272,10 @@ class GmailOAuthService:
     async def check_account_health(self, account: GmailAccount) -> GmailConnectionStatus:
         """
         Perform a non-intrusive health assessment of the stored Gmail account.
-        Checks:
-        1. Encryption key configuration and token decryption integrity.
-        2. Refresh token presence.
-        3. Token validity check via token refresh against Google's OAuth endpoint.
-        
-        DOES NOT:
-        - Send any email
-        - Create any Gmail messages
-        - Read inbox or access messages
+        Delegates to GmailCredentialService for accurate Google error classification.
+        DOES NOT send any email or read inbox.
         """
-        if account.connection_status == GmailConnectionStatus.DISCONNECTED:
-            return GmailConnectionStatus.DISCONNECTED
-
-        if not account.encrypted_refresh_token or not account.encrypted_refresh_token.strip():
-            return GmailConnectionStatus.DISCONNECTED
-
-        # 1. Decrypt token
-        try:
-            refresh_token = self._encryption_service.decrypt(account.encrypted_refresh_token)
-        except TokenEncryptionKeyMissingError:
-            log.error("Token encryption key missing during health check. Marking ERROR.")
-            return GmailConnectionStatus.ERROR
-        except Exception as exc:
-            log.warning("Decryption failed during health check. Token corrupted or wrong key.", error=str(exc))
-            return GmailConnectionStatus.ERROR
-
-        if not refresh_token or not refresh_token.strip():
-            return GmailConnectionStatus.DISCONNECTED
-
-        # 2. Check token refresh validity with Google OAuth server
-        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
-            log.warning("OAuth client configuration missing during health check.")
-            return GmailConnectionStatus.ERROR
-
-        token_url = "https://oauth2.googleapis.com/token"
-        payload = {
-            "client_id": settings.GOOGLE_CLIENT_ID,
-            "client_secret": settings.GOOGLE_CLIENT_SECRET,
-            "refresh_token": refresh_token,
-            "grant_type": "refresh_token",
-        }
-
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(token_url, data=payload)
-                if response.status_code == 200:
-                    return GmailConnectionStatus.CONNECTED
-                elif response.status_code in (400, 401):
-                    # Google rejected refresh token (e.g. revoked, expired)
-                    log.warning("Google rejected refresh token during health check", status=response.status_code)
-                    return GmailConnectionStatus.DISCONNECTED
-                else:
-                    log.warning("Unexpected status from Google during health check", status=response.status_code)
-                    return GmailConnectionStatus.ERROR
-        except Exception as exc:
-            log.warning("Network failure during Gmail health check", error=str(exc))
-            return GmailConnectionStatus.ERROR
+        from services.gmail_credential_service import GmailCredentialService
+        credential_service = GmailCredentialService(encryption_service=self._encryption_service)
+        result = await credential_service.verify_credential_health(account)
+        return result.status
