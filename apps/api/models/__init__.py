@@ -285,6 +285,16 @@ from models.outreach import (
     SuppressionRecord,
 )
 
+# ── Phase 4 Models ────────────────────────────────────────────────────────────
+
+from models.follow_up import (
+    FollowUpSequence,
+    FollowUpSequenceStatus,
+    FollowUpStep,
+    FollowUpStepStatus,
+    FollowUpStopReason,
+)
+
 __all__ = [
     # Mixins
     "TimestampMixin",
@@ -315,5 +325,11 @@ __all__ = [
     "DeliveryEventType",
     # Phase 4
     "ConsumedOAuthState",
+    "FollowUpSequence",
+    "FollowUpSequenceStatus",
+    "FollowUpStep",
+    "FollowUpStepStatus",
+    "FollowUpStopReason",
 ]
+
 
