@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from models.outreach import (
     DeliveryEventType,
@@ -34,19 +34,47 @@ class OutreachDraftCreate(BaseModel):
     body_html: Optional[str] = Field(default=None, description="HTML formatted email content")
 
 
+class OutreachDraftUpdateRequest(BaseModel):
+    subject: Optional[str] = Field(default=None, min_length=1, max_length=500, description="Updated subject line")
+    body_text: Optional[str] = Field(default=None, min_length=1, description="Updated plaintext body")
+    body_html: Optional[str] = Field(default=None, description="Updated HTML body")
+
+    @field_validator("subject", "body_text")
+    @classmethod
+    def validate_non_empty_if_present(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.strip():
+            raise ValueError("Field cannot be empty or whitespace only if provided")
+        return v.strip() if v is not None else None
+
+
+class OutreachDraftRejectRequest(BaseModel):
+    reason: str = Field(..., min_length=1, max_length=1000, description="Mandatory reason for rejection")
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason_non_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("Rejection reason cannot be empty or whitespace only")
+        return v.strip()
+
+
 class OutreachDraftResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: uuid.UUID
     lead_id: uuid.UUID
+    company_name: Optional[str] = None
+    lead_domain: Optional[str] = None
     recipient_email: str
     subject: str
     body_text: str
     body_html: Optional[str] = None
+    evidence: Optional[Dict[str, Any]] = None
     status: OutreachDraftStatus
     approved_at: Optional[datetime] = None
     approved_by: Optional[str] = None
     rejected_at: Optional[datetime] = None
+    rejected_by: Optional[str] = None
     rejection_reason: Optional[str] = None
     created_at: datetime
     updated_at: datetime

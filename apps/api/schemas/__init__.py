@@ -184,7 +184,9 @@ from schemas.outreach import (
     GmailAccountCreate,
     GmailAccountResponse,
     OutreachDraftCreate,
+    OutreachDraftRejectRequest,
     OutreachDraftResponse,
+    OutreachDraftUpdateRequest,
     OutreachMessageResponse,
     SendAttemptResponse,
     SuppressionRecordCreate,
@@ -211,6 +213,8 @@ __all__ = [
     # Phase 3
     "OutreachDraftCreate",
     "OutreachDraftResponse",
+    "OutreachDraftUpdateRequest",
+    "OutreachDraftRejectRequest",
     "GmailAccountCreate",
     "GmailAccountResponse",
     "OutreachMessageResponse",

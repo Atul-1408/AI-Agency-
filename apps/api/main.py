@@ -31,7 +31,7 @@ from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.logging import configure_logging
-from routers import agents, auth, health, leads
+from routers import agents, auth, health, leads, outreach
 
 # Configure logging before anything else
 configure_logging(log_level=settings.LOG_LEVEL, production=settings.is_production)
@@ -100,6 +100,7 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
 app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
 app.include_router(leads.router, prefix="/api/v1/leads", tags=["leads"])
+app.include_router(outreach.router, prefix="/api/v1/outreach", tags=["outreach"])
 
 
 # ── Root ──────────────────────────────────────────────────────────────────────

@@ -10,6 +10,11 @@ from services.personalization_engine import (
     extract_factual_observations,
     sanitize_text,
 )
+from services.outreach_service import (
+    DraftNotFoundError,
+    InvalidStateTransitionError,
+    OutreachService,
+)
 from services.safety_controller import (
     CircuitBreaker,
     SafetyCheckResult,
@@ -29,4 +34,7 @@ __all__ = [
     "CircuitBreaker",
     "SafetyController",
     "SafetyCheckResult",
+    "OutreachService",
+    "DraftNotFoundError",
+    "InvalidStateTransitionError",
 ]

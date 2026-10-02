@@ -128,6 +128,7 @@ class OutreachDraft(UUIDPKMixin, TimestampMixin, Base):
     approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     approved_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejected_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     # Relationships
