@@ -97,3 +97,40 @@ class FollowUpEligibilityCheckResponse(BaseModel):
     eligible: bool = Field(..., description="Whether follow-up action is permitted to proceed")
     reason: Optional[str] = Field(default=None, description="Reason if ineligible")
     checks_passed: Dict[str, bool] = Field(default_factory=dict)
+
+
+class DetectRepliesRequest(BaseModel):
+    """Optional parameters for manual reply detection."""
+    sequence_id: Optional[uuid.UUID] = Field(
+        default=None, description="Optional specific follow-up sequence ID to check"
+    )
+    limit: int = Field(
+        default=50, ge=1, le=100, description="Max sequences to inspect"
+    )
+
+
+class DetectRepliesResponse(BaseModel):
+    """Detection run summary."""
+    checked: int = Field(..., description="Number of sequences checked")
+    replies_detected: int = Field(..., description="Number of verified prospect replies detected")
+    sequences_stopped: int = Field(..., description="Number of sequences stopped due to replies")
+    duplicates_ignored: int = Field(..., description="Number of duplicate messages ignored")
+
+
+class InboundMessageResponse(BaseModel):
+    """Safe representation of an inbound prospect message."""
+    id: uuid.UUID
+    gmail_message_id: str
+    gmail_thread_id: str
+    sender_email: str
+    recipient_email: str
+    subject: Optional[str] = None
+    snippet: Optional[str] = None
+    received_at: datetime
+    detected_at: datetime
+    matched_outreach_message_id: Optional[uuid.UUID] = None
+    matched_lead_id: Optional[uuid.UUID] = None
+    matched_sequence_id: Optional[uuid.UUID] = None
+    processing_status: str
+
+    model_config = ConfigDict(from_attributes=True)

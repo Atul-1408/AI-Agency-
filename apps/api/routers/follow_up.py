@@ -29,15 +29,19 @@ from models.follow_up import (
     FollowUpSequenceStatus,
     FollowUpStep,
     FollowUpStopReason,
+    InboundMessage,
 )
 from routers.auth import require_owner
 from schemas import PaginatedResponse
 from schemas.follow_up import (
+    DetectRepliesRequest,
+    DetectRepliesResponse,
     FollowUpEligibilityCheckResponse,
     FollowUpSequenceCreateRequest,
     FollowUpSequenceResponse,
     FollowUpSequenceStopRequest,
     FollowUpStepResponse,
+    InboundMessageResponse,
     ReplyDetectedRequest,
 )
 from services.follow_up_eligibility_service import FollowUpEligibilityService
@@ -48,7 +52,20 @@ from services.follow_up_service import (
     InvalidStateTransitionError,
     SequenceNotFoundError,
 )
-from services.reply_detection_service import ReplyDetectionService
+from services.gmail_reply_service import (
+    GmailReplyAuthError,
+    GmailReplyError,
+    GmailReplyMalformedError,
+    GmailReplyNetworkError,
+    GmailReplyPermissionError,
+    GmailReplyRateLimitError,
+    GmailReplyServerError,
+    GmailReplyTimeoutError,
+)
+from services.reply_detection_service import (
+    DisconnectedGmailAccountError,
+    ReplyDetectionService,
+)
 
 router = APIRouter()
 log = structlog.get_logger(__name__)
@@ -440,4 +457,116 @@ async def check_sequence_eligibility(
         eligible=result.eligible,
         reason=result.reason,
         checks_passed=result.checks_passed,
+    )
+
+
+@router.post("/detect-replies", response_model=DetectRepliesResponse)
+async def detect_replies(
+    payload: Optional[DetectRepliesRequest] = None,
+    owner_email: str = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+) -> DetectRepliesResponse:
+    """
+    Manually trigger detection of prospect replies from Gmail thread metadata.
+    
+    Security & Governance:
+    - Protected by owner authentication and IDOR checks.
+    - Uses only the authenticated owner's connected Gmail account.
+    - Inspects only threads of known active/paused outreach sequences.
+    - Fails closed on any authentication or infrastructure error.
+    - Never exposes OAuth tokens or full email bodies.
+    """
+    verify_owner_access(owner_email)
+
+    sequence_id = payload.sequence_id if payload else None
+    limit = payload.limit if payload else 50
+
+    reply_service = ReplyDetectionService()
+
+    try:
+        summary = await reply_service.detect_replies_for_owner(
+            db=db,
+            owner_id=owner_email,
+            sequence_id=sequence_id,
+            limit=limit,
+        )
+        return DetectRepliesResponse(
+            checked=summary.checked,
+            replies_detected=summary.replies_detected,
+            sequences_stopped=summary.sequences_stopped,
+            duplicates_ignored=summary.duplicates_ignored,
+        )
+    except DisconnectedGmailAccountError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except GmailReplyAuthError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(exc),
+        )
+    except GmailReplyPermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=str(exc),
+        )
+    except GmailReplyRateLimitError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=str(exc),
+        )
+    except GmailReplyTimeoutError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail=str(exc),
+        )
+    except (GmailReplyServerError, GmailReplyNetworkError, GmailReplyMalformedError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        log.error("Unexpected error during reply detection", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred during reply detection.",
+        )
+
+
+@router.get("/inbound-messages", response_model=PaginatedResponse)
+async def list_inbound_messages(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+    lead_id: Optional[uuid.UUID] = Query(None, description="Filter by lead ID"),
+    sequence_id: Optional[uuid.UUID] = Query(None, description="Filter by sequence ID"),
+    owner_email: str = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+) -> PaginatedResponse:
+    """List detected inbound prospect messages with safe metadata and pagination."""
+    verify_owner_access(owner_email)
+
+    query = select(InboundMessage)
+    count_query = select(func.count(InboundMessage.id))
+
+    if lead_id:
+        query = query.where(InboundMessage.matched_lead_id == lead_id)
+        count_query = count_query.where(InboundMessage.matched_lead_id == lead_id)
+
+    if sequence_id:
+        query = query.where(InboundMessage.matched_sequence_id == sequence_id)
+        count_query = count_query.where(InboundMessage.matched_sequence_id == sequence_id)
+
+    total = await db.scalar(count_query) or 0
+
+    offset = (page - 1) * page_size
+    query = query.order_by(InboundMessage.detected_at.desc()).offset(offset).limit(page_size)
+
+    messages = (await db.scalars(query)).all()
+
+    return PaginatedResponse(
+        items=[InboundMessageResponse.model_validate(m) for m in messages],
+        total=total,
+        page=page,
+        page_size=page_size,
     )

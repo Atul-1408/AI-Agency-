@@ -293,6 +293,7 @@ from models.follow_up import (
     FollowUpStep,
     FollowUpStepStatus,
     FollowUpStopReason,
+    InboundMessage,
 )
 
 __all__ = [
@@ -330,6 +331,7 @@ __all__ = [
     "FollowUpStep",
     "FollowUpStepStatus",
     "FollowUpStopReason",
+    "InboundMessage",
 ]
 
 

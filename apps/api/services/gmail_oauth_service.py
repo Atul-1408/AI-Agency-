@@ -13,14 +13,14 @@ Handles:
 SECURITY MANDATES:
 1. ONLY minimum required OAuth scopes:
    - https://www.googleapis.com/auth/gmail.send
+   - https://www.googleapis.com/auth/gmail.readonly
    - openid
    - email
 2. STRICTLY FORBIDDEN:
-   - gmail.readonly
    - gmail.modify
    - gmail.compose
    - gmail.metadata
-   No inbox-reading permissions.
+   No inbox-modifying or drafting permissions.
 3. Refresh tokens are NEVER logged, exposed in API responses, or stored in plaintext.
 4. Fails closed if configuration (client ID, secret, encryption key) is missing.
 """
@@ -44,6 +44,7 @@ log = structlog.get_logger(__name__)
 # Minimum required OAuth scopes ONLY
 MINIMUM_OAUTH_SCOPES: List[str] = [
     "https://www.googleapis.com/auth/gmail.send",
+    "https://www.googleapis.com/auth/gmail.readonly",
     "openid",
     "email",
 ]
@@ -51,6 +52,7 @@ MINIMUM_OAUTH_SCOPES: List[str] = [
 # Scope display labels for client status
 SAFE_SCOPE_LABELS: List[str] = [
     "gmail.send",
+    "gmail.readonly",
     "openid",
     "email",
 ]

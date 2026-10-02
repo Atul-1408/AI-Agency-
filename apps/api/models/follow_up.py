@@ -186,3 +186,73 @@ class FollowUpStep(UUIDPKMixin, TimestampMixin, Base):
     # Relationships
     sequence: Mapped["FollowUpSequence"] = relationship(back_populates="steps")
     draft: Mapped[Optional["OutreachDraft"]] = relationship(lazy="select")
+
+
+class InboundMessage(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Audit record of an inbound prospect message/reply detected via Gmail.
+    
+    Guarantees:
+    - Unique constraint on gmail_message_id ensures idempotency and duplicate prevention.
+    - Minimal stored data: snippet and metadata only (no full email bodies).
+    - Never stores OAuth tokens or credentials.
+    - Anchored to matched OutreachMessage, Lead, and FollowUpSequence where applicable.
+    """
+    __tablename__ = "inbound_messages"
+    __table_args__ = (
+        Index("ix_inbound_msg_thread", "gmail_thread_id"),
+        Index("ix_inbound_msg_sender", "sender_email"),
+        Index("ix_inbound_msg_lead", "matched_lead_id"),
+        Index("ix_inbound_msg_seq", "matched_sequence_id"),
+    )
+
+    gmail_message_id: Mapped[str] = mapped_column(
+        String(255), unique=True, nullable=False, index=True
+    )
+    gmail_thread_id: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+    sender_email: Mapped[str] = mapped_column(
+        String(255), nullable=False, index=True
+    )
+    recipient_email: Mapped[str] = mapped_column(
+        String(255), nullable=False
+    )
+    subject: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    snippet: Mapped[Optional[str]] = mapped_column(
+        String(1000), nullable=True
+    )
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    detected_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    matched_outreach_message_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("outreach_messages.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    matched_lead_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("leads.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    matched_sequence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("follow_up_sequences.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    processing_status: Mapped[str] = mapped_column(
+        String(50), default="PROCESSED", nullable=False, index=True
+    )
+
+    # Relationships
+    lead: Mapped[Optional["Lead"]] = relationship(lazy="select")
+    outreach_message: Mapped[Optional["OutreachMessage"]] = relationship(lazy="select")
+    sequence: Mapped[Optional["FollowUpSequence"]] = relationship(lazy="select")
