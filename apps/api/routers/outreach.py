@@ -11,29 +11,47 @@ Implements Gate 2 Human Approval API:
 """
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 import uuid
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
 from core.database import get_db
-from models.outreach import OutreachDraftStatus
+from models import (
+    AgentRun,
+    AgentRunStatus,
+    GmailAccount,
+    GmailConnectionStatus,
+    OutreachDraft,
+    OutreachDraftStatus,
+    OutreachMessage,
+    OutreachMessageStatus,
+    SendAttempt,
+    SendAttemptResult,
+)
 from routers.auth import require_owner
 from schemas import PaginatedResponse
 from schemas.outreach import (
+    GmailDispatchResponse,
     OutreachDraftRejectRequest,
     OutreachDraftResponse,
     OutreachDraftUpdateRequest,
+)
+from services.gmail_dispatch_service import (
+    GmailDispatchError,
+    GmailDispatchService,
 )
 from services.outreach_service import (
     DraftNotFoundError,
     InvalidStateTransitionError,
     OutreachService,
 )
+from services.safety_controller import SafetyController
 
 router = APIRouter()
 log = structlog.get_logger(__name__)
@@ -227,3 +245,271 @@ async def reset_draft(
     except InvalidStateTransitionError as e:
         await db.commit()
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+async def log_dispatch_audit(
+    db: AsyncSession,
+    action: str,
+    owner_email: str,
+    status: AgentRunStatus,
+    input_data: Optional[Dict[str, Any]] = None,
+    output_data: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None,
+) -> AgentRun:
+    """
+    Record an immutable audit entry in agent_runs for outreach dispatch lifecycle events.
+    Strictly sanitizes all payloads to prevent any secret or token leakage.
+    """
+    now = datetime.now(timezone.utc)
+    forbidden_keys = {
+        "token", "refresh_token", "access_token", "client_secret",
+        "code", "authorization_code", "encrypted_refresh_token", "key"
+    }
+
+    def _sanitize(data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not data:
+            return {}
+        return {k: v for k, v in data.items() if k.lower() not in forbidden_keys}
+
+    run = AgentRun(
+        agent_name="gmail_dispatch",
+        status=status,
+        input_data={
+            "action": action,
+            "owner": owner_email,
+            **_sanitize(input_data),
+        },
+        output_data=_sanitize(output_data),
+        error_message=error_message,
+        started_at=now,
+        completed_at=now,
+    )
+    db.add(run)
+    await db.flush()
+    return run
+
+
+# ── Single Manual Send (Phase 4 Stage 4.3) ───────────────────────────────────
+
+@router.post("/drafts/{draft_id}/send", response_model=GmailDispatchResponse)
+async def send_draft(
+    draft_id: uuid.UUID,
+    owner_email: str = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+) -> GmailDispatchResponse:
+    """
+    Controlled Single-Email Manual Dispatch Path.
+    
+    PRE-SEND SAFETY ORDER:
+    1. Authenticate & authorize agency owner.
+    2. Load draft with row locking to prevent race conditions.
+    3. Idempotency check: block duplicate send if draft is already SENT.
+    4. Verify draft status == APPROVED (Gate 2 human approval).
+    5. Run full 12-point SafetyController authorization (quotas, pacing, suppression, MX, health).
+    6. Verify owner's Gmail account is CONNECTED.
+    7. Send exactly ONE message via GmailDispatchService.
+    8. Record OutreachMessage and SendAttempt.
+    9. Complete immutable audit trail.
+    """
+    verify_owner_access(owner_email)
+
+    # 1. Audit dispatch requested
+    await log_dispatch_audit(
+        db=db,
+        action="dispatch_requested",
+        owner_email=owner_email,
+        status=AgentRunStatus.PENDING,
+        input_data={"draft_id": str(draft_id)},
+    )
+
+    # 2. Load draft with concurrency protection
+    stmt = select(OutreachDraft).where(OutreachDraft.id == draft_id).with_for_update()
+    draft = await db.scalar(stmt)
+    if not draft:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Outreach draft {draft_id} does not exist.",
+        )
+
+    # 3. Idempotency & Duplicate Send Protection
+    if draft.status == OutreachDraftStatus.SENT:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Outreach draft has already been sent.",
+        )
+
+    existing_sent_message = await db.scalar(
+        select(OutreachMessage).where(
+            OutreachMessage.draft_id == draft.id,
+            OutreachMessage.status == OutreachMessageStatus.SENT,
+        )
+    )
+    if existing_sent_message:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Outreach message already exists for this draft.",
+        )
+
+    # 4. Gate 2 Approval Verification
+    if draft.status != OutreachDraftStatus.APPROVED:
+        now = datetime.now(timezone.utc)
+        err_msg = f"Draft status must be APPROVED before dispatch (current status: {draft.status.value})."
+        attempt = SendAttempt(
+            draft_id=draft.id,
+            lead_id=draft.lead_id,
+            recipient_email=draft.recipient_email,
+            attempted_at=now,
+            result=SendAttemptResult.BLOCKED,
+            failure_reason=err_msg,
+        )
+        db.add(attempt)
+        await log_dispatch_audit(
+            db=db,
+            action="dispatch_blocked",
+            owner_email=owner_email,
+            status=AgentRunStatus.FAILED,
+            error_message=err_msg,
+            input_data={"draft_id": str(draft.id), "current_status": draft.status.value},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=err_msg,
+        )
+
+    # 5. SafetyController Comprehensive Authorization
+    safety_controller = SafetyController()
+    safety_result = await safety_controller.authorize(db, draft_id=draft.id, record_blocked_attempt=True)
+
+    if not safety_result.allowed:
+        await log_dispatch_audit(
+            db=db,
+            action="dispatch_blocked",
+            owner_email=owner_email,
+            status=AgentRunStatus.FAILED,
+            error_message=safety_result.blocked_reason,
+            input_data={"draft_id": str(draft.id), "violations": safety_result.violations},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Safety check blocked dispatch: {safety_result.blocked_reason}",
+        )
+
+    # 6. Verify Gmail Account Connectivity
+    account = await db.scalar(
+        select(GmailAccount).where(
+            GmailAccount.owner_id == owner_email,
+            GmailAccount.connection_status == GmailConnectionStatus.CONNECTED,
+        )
+    )
+    if not account or not account.encrypted_refresh_token:
+        now = datetime.now(timezone.utc)
+        err_msg = "No active connected Gmail account found for owner."
+        attempt = SendAttempt(
+            draft_id=draft.id,
+            lead_id=draft.lead_id,
+            recipient_email=draft.recipient_email,
+            attempted_at=now,
+            result=SendAttemptResult.BLOCKED,
+            failure_reason=err_msg,
+        )
+        db.add(attempt)
+        await log_dispatch_audit(
+            db=db,
+            action="dispatch_blocked",
+            owner_email=owner_email,
+            status=AgentRunStatus.FAILED,
+            error_message=err_msg,
+            input_data={"draft_id": str(draft.id)},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=err_msg,
+        )
+
+    # 7. Dispatch via Gmail API
+    dispatch_service = GmailDispatchService()
+    try:
+        dispatch_result = await dispatch_service.dispatch_draft(account=account, draft=draft)
+    except GmailDispatchError as exc:
+        now = datetime.now(timezone.utc)
+        attempt = SendAttempt(
+            draft_id=draft.id,
+            lead_id=draft.lead_id,
+            recipient_email=draft.recipient_email,
+            attempted_at=now,
+            result=SendAttemptResult.FAILED,
+            failure_reason=str(exc),
+        )
+        db.add(attempt)
+        await log_dispatch_audit(
+            db=db,
+            action="dispatch_failed",
+            owner_email=owner_email,
+            status=AgentRunStatus.FAILED,
+            error_message=str(exc),
+            input_data={"draft_id": str(draft.id), "recipient_email": draft.recipient_email},
+        )
+        await db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gmail API dispatch failed: {str(exc)}",
+        )
+
+    # 8. Success: Update Draft, Create OutreachMessage, and Record SendAttempt
+    now = dispatch_result.sent_at
+    draft.status = OutreachDraftStatus.SENT
+
+    message = OutreachMessage(
+        draft_id=draft.id,
+        lead_id=draft.lead_id,
+        recipient_email=draft.recipient_email,
+        subject=draft.subject,
+        gmail_message_id=dispatch_result.gmail_message_id,
+        gmail_thread_id=dispatch_result.gmail_thread_id,
+        sent_at=now,
+        status=OutreachMessageStatus.SENT,
+    )
+    db.add(message)
+    await db.flush()
+
+    attempt = SendAttempt(
+        draft_id=draft.id,
+        lead_id=draft.lead_id,
+        recipient_email=draft.recipient_email,
+        attempted_at=now,
+        result=SendAttemptResult.SUCCESS,
+        gmail_message_id=dispatch_result.gmail_message_id,
+        gmail_thread_id=dispatch_result.gmail_thread_id,
+    )
+    db.add(attempt)
+
+    await log_dispatch_audit(
+        db=db,
+        action="dispatch_success",
+        owner_email=owner_email,
+        status=AgentRunStatus.COMPLETED,
+        input_data={
+            "draft_id": str(draft.id),
+            "lead_id": str(draft.lead_id),
+            "recipient_email": draft.recipient_email,
+            "gmail_message_id": dispatch_result.gmail_message_id,
+            "gmail_thread_id": dispatch_result.gmail_thread_id,
+        },
+    )
+    await db.commit()
+
+    return GmailDispatchResponse(
+        success=True,
+        draft_id=draft.id,
+        lead_id=draft.lead_id,
+        recipient_email=draft.recipient_email,
+        subject=draft.subject,
+        gmail_message_id=dispatch_result.gmail_message_id,
+        gmail_thread_id=dispatch_result.gmail_thread_id,
+        sent_at=now,
+        status="sent",
+    )
+

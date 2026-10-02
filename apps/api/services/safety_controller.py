@@ -266,14 +266,14 @@ class SafetyController:
         )
         res_attempt = await db.execute(stmt_attempt)
         last_attempt = res_attempt.scalar_one_or_none()
-
         timestamps = [t for t in [last_sent, last_attempt] if t is not None]
         if not timestamps:
             return None, True
 
         most_recent = max(timestamps)
-        # Handle naive timestamps from SQLite if necessary
-        if most_recent.tzinfo is None:
+        if isinstance(most_recent, (int, float)):
+            most_recent = datetime.fromtimestamp(most_recent, tz=timezone.utc)
+        elif hasattr(most_recent, "tzinfo") and most_recent.tzinfo is None:
             most_recent = most_recent.replace(tzinfo=timezone.utc)
 
         elapsed = (ref_time - most_recent).total_seconds()
@@ -503,3 +503,22 @@ class SafetyController:
             new_leads_count=new_leads,
             pacing_elapsed_seconds=pacing_elapsed,
         )
+
+    async def authorize(
+        self,
+        db: AsyncSession,
+        draft_id: uuid.UUID,
+        record_blocked_attempt: bool = True,
+        override_now: Optional[datetime] = None,
+    ) -> SafetyCheckResult:
+        """
+        Final pre-send authorization check.
+        Enforces all 12 safety rules and fails closed.
+        """
+        return await self.validate_send(
+            db=db,
+            draft_id=draft_id,
+            record_blocked_attempt=record_blocked_attempt,
+            override_now=override_now,
+        )
+

@@ -268,3 +268,67 @@ class GmailCredentialService:
             error_code=f"HTTP_{status_code}",
             error_detail=f"Unexpected HTTP {status_code} from Google OAuth server.",
         )
+
+    async def get_access_token(self, account: GmailAccount) -> str:
+        """
+        Obtain a valid ephemeral access token for the given account.
+        Fails closed on any decryption error, missing configuration, or Google rejection.
+        Does not log tokens or persist access tokens.
+        """
+        if account.connection_status == GmailConnectionStatus.DISCONNECTED:
+            raise CredentialRefreshError("Gmail account is marked as disconnected.")
+
+        if not account.encrypted_refresh_token or not account.encrypted_refresh_token.strip():
+            raise CredentialRefreshError("No encrypted refresh token stored for account.")
+
+        try:
+            refresh_token = self._encryption_service.decrypt(account.encrypted_refresh_token)
+        except Exception as exc:
+            log.warning("Failed to decrypt refresh token when requesting access token", error=str(exc))
+            raise CredentialRefreshError(f"Token decryption failed: {str(exc)}") from exc
+
+        if not refresh_token or not refresh_token.strip():
+            raise CredentialRefreshError("Decrypted refresh token was empty.")
+
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            raise CredentialRefreshError("Google OAuth client configuration is missing.")
+
+        token_url = "https://oauth2.googleapis.com/token"
+        payload = {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.post(token_url, data=payload)
+        except Exception as exc:
+            log.warning("Failed to connect to Google OAuth server for token refresh", error=str(exc))
+            raise CredentialRefreshError(f"Network error refreshing access token: {str(exc)}") from exc
+
+        if response.status_code == 200:
+            try:
+                data = response.json()
+            except Exception as exc:
+                raise CredentialRefreshError("Malformed response from Google token endpoint.") from exc
+
+            access_token = data.get("access_token")
+            if not access_token:
+                raise CredentialRefreshError("Google token response did not contain access_token.")
+            return access_token
+
+        try:
+            err_data = response.json()
+            err_msg = err_data.get("error_description") or err_data.get("error") or str(response.status_code)
+        except Exception:
+            err_msg = str(response.status_code)
+
+        raise CredentialRefreshError(f"Google rejected token refresh (HTTP {response.status_code}: {err_msg})")
+
+
+class CredentialRefreshError(Exception):
+    """Raised when access token retrieval fails."""
+    pass
+

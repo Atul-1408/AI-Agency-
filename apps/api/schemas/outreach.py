@@ -186,3 +186,21 @@ class DeliveryEventResponse(BaseModel):
     event_timestamp: datetime
     metadata_json: Optional[Dict[str, Any]] = Field(default=None, alias="metadata")
     created_at: datetime
+
+
+# ── Gmail Dispatch Schemas (Phase 4 Stage 4.3) ────────────────────────────────
+
+class GmailDispatchResponse(BaseModel):
+    """Result of single manual email dispatch via Gmail API."""
+    model_config = ConfigDict(from_attributes=True)
+
+    success: bool = Field(..., description="Whether the email was accepted and sent by Gmail API")
+    draft_id: uuid.UUID = Field(..., description="ID of the sent OutreachDraft")
+    lead_id: uuid.UUID = Field(..., description="ID of the associated Lead")
+    recipient_email: str = Field(..., description="Recipient email address")
+    subject: str = Field(..., description="Subject line sent")
+    gmail_message_id: str = Field(..., description="Gmail message ID assigned by Google")
+    gmail_thread_id: str = Field(..., description="Gmail thread ID assigned by Google")
+    sent_at: datetime = Field(..., description="Timestamp of dispatch")
+    status: str = Field(default="sent", description="Lifecycle state of dispatch")
+
