@@ -50,9 +50,13 @@ class Settings(BaseSettings):
     NEMOTRON_BASE_URL: str = "https://integrate.api.nvidia.com/v1"
     NEMOTRON_MODEL: str = "nvidia/llama-3.1-nemotron-ultra-253b-v1"
 
-    # ── Future integrations (not used in Phase 1) ─────────────
-    # These are documented here so .env.example is complete,
-    # but no code in Phase 1 reads or uses them.
+    # ── Gmail OAuth & Encryption (Phase 4 Stage 4.1) ──────────
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_SECRET: str = ""
+    GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/gmail/callback"
+    GMAIL_TOKEN_ENCRYPTION_KEY: str = ""
+
+    # Legacy / alias compatibility
     GMAIL_CLIENT_ID: str = ""
     GMAIL_CLIENT_SECRET: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
