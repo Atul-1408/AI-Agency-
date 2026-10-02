@@ -36,13 +36,32 @@ from schemas import PaginatedResponse
 from schemas.follow_up import (
     DetectRepliesRequest,
     DetectRepliesResponse,
+    FollowUpDraftGenerateResponse,
     FollowUpEligibilityCheckResponse,
     FollowUpSequenceCreateRequest,
     FollowUpSequenceResponse,
     FollowUpSequenceStopRequest,
+    FollowUpSendResponse,
     FollowUpStepResponse,
     InboundMessageResponse,
     ReplyDetectedRequest,
+)
+from services.follow_up_dispatch_service import (
+    FollowUpDispatchEligibilityError,
+    FollowUpDispatchGmailError,
+    FollowUpDispatchIdempotentError,
+    FollowUpDispatchReplyDetectedError,
+    FollowUpDispatchSafetyError,
+    FollowUpDispatchSequenceNotFoundError,
+    FollowUpDispatchService,
+    FollowUpDispatchStepNotFoundError,
+    FollowUpDispatchDraftNotFoundError,
+)
+from services.follow_up_draft_service import (
+    FollowUpDraftEligibilityError,
+    FollowUpDraftService,
+    ReplyDetectedError,
+    StepNotFoundError,
 )
 from services.follow_up_eligibility_service import FollowUpEligibilityService
 from services.follow_up_service import (
@@ -570,3 +589,167 @@ async def list_inbound_messages(
         page=page,
         page_size=page_size,
     )
+
+
+@router.post(
+    "/sequences/{sequence_id}/steps/{step_id}/generate-draft",
+    response_model=FollowUpDraftGenerateResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def generate_follow_up_draft(
+    sequence_id: uuid.UUID,
+    step_id: uuid.UUID,
+    owner_email: str = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+) -> FollowUpDraftGenerateResponse:
+    """
+    Generate a factual personalized follow-up draft for an eligible sequence step.
+    The draft is persisted strictly with status = PENDING_APPROVAL for Gate 2 human review.
+    
+    Security & Governance:
+    - Requires owner authentication and IDOR verification.
+    - Evaluates strict sequence/step eligibility.
+    - Fresh reply check: aborts and terminates sequence if prospect already replied.
+    - Idempotent: returns existing draft if one was already generated.
+    - Concurrency-safe: database unique constraint prevents duplicate drafts.
+    - Send-free: never executes email dispatch or consumes send quota.
+    """
+    verify_owner_access(owner_email)
+
+    draft_service = FollowUpDraftService()
+
+    try:
+        draft, is_existing = await draft_service.generate_draft_for_step(
+            db=db,
+            sequence_id=sequence_id,
+            step_id=step_id,
+            owner_id=owner_email,
+        )
+        return FollowUpDraftGenerateResponse(
+            draft_id=draft.id,
+            sequence_id=sequence_id,
+            step_id=step_id,
+            status=draft.status.value,
+            subject=draft.subject,
+            recipient_email=draft.recipient_email,
+            is_existing=is_existing,
+        )
+    except SequenceNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except StepNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        )
+    except ReplyDetectedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+    except FollowUpDraftEligibilityError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+    except Exception as exc:
+        log.error("Unexpected error generating follow-up draft", error=str(exc))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error generating follow-up draft.",
+        )
+
+
+# ── Stage 4.7 — Follow-up Send Authorization & Dispatch ──────────────────────
+
+@router.post(
+    "/sequences/{sequence_id}/steps/{step_id}/send",
+    response_model=FollowUpSendResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def send_follow_up_step(
+    sequence_id: uuid.UUID,
+    step_id: uuid.UUID,
+    owner_email: str = Depends(require_owner),
+    db: AsyncSession = Depends(get_db),
+) -> FollowUpSendResponse:
+    """
+    Dispatch a single approved follow-up draft for a specific sequence step.
+
+    COMPLETE PRE-SEND ORDER:
+    1. Owner authentication and IDOR verification.
+    2. Sequence and step loaded with row locking (concurrency-safe).
+    3. Idempotency: blocked if step is already SENT.
+    4. Eligibility: sequence must be ACTIVE, step PENDING or READY,
+       original message SENT, lead not disqualified, Gmail healthy,
+       not suppressed, circuit breaker permits.
+    5. Draft verification: attached draft must be APPROVED (Gate 2).
+    6. Fresh database reply check: dispatch blocked and sequence stopped
+       if a reply is already recorded for the thread.
+    7. SafetyController full 12-point authorization (quotas, pacing,
+       suppression, MX verification, Gmail health, circuit breaker).
+    8. Gmail account connectivity verification.
+    9. GmailDispatchService sends exactly ONE message.
+    10. OutreachMessage + SendAttempt recorded.
+    11. FollowUpStep → SENT, sequence advances or COMPLETES.
+    12. Immutable audit trail in agent_runs.
+
+    Fails closed on any safety, eligibility, or infrastructure failure.
+    Never sends without Gate 2 approval.
+    Never bypasses SafetyController.
+    """
+    verify_owner_access(owner_email)
+    dispatch_service = FollowUpDispatchService()
+
+    try:
+        result = await dispatch_service.dispatch_follow_up_step(
+            db=db,
+            sequence_id=sequence_id,
+            step_id=step_id,
+            owner_id=owner_email,
+        )
+        await db.commit()
+        return FollowUpSendResponse(
+            success=True,
+            outreach_message_id=result.outreach_message_id,
+            send_attempt_id=result.send_attempt_id,
+            gmail_message_id=result.gmail_message_id,
+            gmail_thread_id=result.gmail_thread_id,
+            sent_at=result.sent_at,
+            recipient_email=result.recipient_email,
+            subject=result.subject,
+            sequence_id=result.sequence_id,
+            step_id=result.step_id,
+            step_number=result.step_number,
+            sequence_completed=result.sequence_completed,
+            status="sent",
+        )
+    except FollowUpDispatchSequenceNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except FollowUpDispatchStepNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
+    except FollowUpDispatchDraftNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except FollowUpDispatchIdempotentError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except FollowUpDispatchReplyDetectedError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    except FollowUpDispatchEligibilityError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except FollowUpDispatchSafetyError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+    except FollowUpDispatchGmailError as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc))
+    except Exception as exc:
+        log.error(
+            "Unexpected error during follow-up dispatch",
+            sequence_id=str(sequence_id),
+            step_id=str(step_id),
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unexpected error occurred during follow-up dispatch.",
+        )

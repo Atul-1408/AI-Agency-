@@ -76,6 +76,8 @@ class OutreachDraftResponse(BaseModel):
     rejected_at: Optional[datetime] = None
     rejected_by: Optional[str] = None
     rejection_reason: Optional[str] = None
+    follow_up_sequence_id: Optional[uuid.UUID] = None
+    follow_up_step_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 

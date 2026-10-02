@@ -134,3 +134,34 @@ class InboundMessageResponse(BaseModel):
     processing_status: str
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class FollowUpDraftGenerateResponse(BaseModel):
+    """Result of generating a follow-up draft."""
+    draft_id: uuid.UUID = Field(..., description="ID of generated OutreachDraft")
+    sequence_id: uuid.UUID = Field(..., description="ID of FollowUpSequence")
+    step_id: uuid.UUID = Field(..., description="ID of FollowUpStep")
+    status: str = Field(default="PENDING_APPROVAL", description="Status of the generated draft")
+    subject: str = Field(..., description="Draft subject line")
+    recipient_email: str = Field(..., description="Recipient email address")
+    is_existing: bool = Field(default=False, description="Whether this returned an existing draft")
+
+
+class FollowUpSendResponse(BaseModel):
+    """Result of dispatching a follow-up step via Gate 2 approved draft."""
+    success: bool = Field(default=True)
+    outreach_message_id: uuid.UUID = Field(..., description="ID of created OutreachMessage")
+    send_attempt_id: uuid.UUID = Field(..., description="ID of recorded SendAttempt")
+    gmail_message_id: str = Field(..., description="Google-assigned Gmail message ID")
+    gmail_thread_id: str = Field(..., description="Google-assigned Gmail thread ID")
+    sent_at: datetime = Field(..., description="UTC timestamp of send")
+    recipient_email: str = Field(..., description="Recipient email address")
+    subject: str = Field(..., description="Subject line of sent message")
+    sequence_id: uuid.UUID = Field(..., description="FollowUpSequence ID")
+    step_id: uuid.UUID = Field(..., description="FollowUpStep ID")
+    step_number: int = Field(..., description="Step number that was sent")
+    sequence_completed: bool = Field(
+        default=False,
+        description="True if this was the final step and the sequence is now COMPLETED",
+    )
+    status: str = Field(default="sent")

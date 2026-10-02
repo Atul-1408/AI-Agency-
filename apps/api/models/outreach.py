@@ -39,6 +39,7 @@ from models import TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
     from models import Lead
+    from models.follow_up import FollowUpSequence, FollowUpStep
 
 
 # ── Enums ─────────────────────────────────────────────────────────────────────
@@ -131,6 +132,21 @@ class OutreachDraft(UUIDPKMixin, TimestampMixin, Base):
     rejected_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    # Follow-up Sequence association (if this draft is part of a follow-up sequence)
+    follow_up_sequence_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("follow_up_sequences.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+        index=True,
+    )
+    follow_up_step_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("follow_up_steps.id", ondelete="SET NULL", use_alter=True),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+
     # Relationships
     lead: Mapped["Lead"] = relationship(back_populates="outreach_drafts")
     messages: Mapped[List["OutreachMessage"]] = relationship(
@@ -139,6 +155,14 @@ class OutreachDraft(UUIDPKMixin, TimestampMixin, Base):
     )
     send_attempts: Mapped[List["SendAttempt"]] = relationship(
         back_populates="draft",
+        lazy="select",
+    )
+    follow_up_sequence: Mapped[Optional["FollowUpSequence"]] = relationship(
+        foreign_keys=[follow_up_sequence_id],
+        lazy="select",
+    )
+    follow_up_step: Mapped[Optional["FollowUpStep"]] = relationship(
+        foreign_keys=[follow_up_step_id],
         lazy="select",
     )
 

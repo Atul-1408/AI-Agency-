@@ -131,7 +131,7 @@ class FollowUpSequence(UUIDPKMixin, TimestampMixin, Base):
 
     # Relationships
     lead: Mapped["Lead"] = relationship(lazy="select")
-    draft: Mapped[Optional["OutreachDraft"]] = relationship(lazy="select")
+    draft: Mapped[Optional["OutreachDraft"]] = relationship(foreign_keys=[outreach_draft_id], lazy="select")
     original_message: Mapped[Optional["OutreachMessage"]] = relationship(lazy="select")
     steps: Mapped[List["FollowUpStep"]] = relationship(
         back_populates="sequence",
@@ -185,7 +185,7 @@ class FollowUpStep(UUIDPKMixin, TimestampMixin, Base):
 
     # Relationships
     sequence: Mapped["FollowUpSequence"] = relationship(back_populates="steps")
-    draft: Mapped[Optional["OutreachDraft"]] = relationship(lazy="select")
+    draft: Mapped[Optional["OutreachDraft"]] = relationship(foreign_keys=[draft_id], lazy="select")
 
 
 class InboundMessage(UUIDPKMixin, TimestampMixin, Base):
