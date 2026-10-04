@@ -322,6 +322,17 @@ from models.project import (
     ProjectStatus,
 )
 
+# ── Phase 6.1 Models ──────────────────────────────────────────────────────────
+
+from models.website_builder import (
+    ACTIVE_BUILD_STATUSES,
+    TERMINAL_BUILD_STATUSES,
+    WebsiteBuildArtifact,
+    WebsiteBuildArtifactType,
+    WebsiteBuildSession,
+    WebsiteBuildSessionStatus,
+)
+
 __all__ = [
     # Mixins
     "TimestampMixin",
@@ -376,4 +387,11 @@ __all__ = [
     # Phase 5.4
     "Project",
     "ProjectStatus",
+    # Phase 6.1
+    "WebsiteBuildSession",
+    "WebsiteBuildSessionStatus",
+    "ACTIVE_BUILD_STATUSES",
+    "TERMINAL_BUILD_STATUSES",
+    "WebsiteBuildArtifact",
+    "WebsiteBuildArtifactType",
 ]

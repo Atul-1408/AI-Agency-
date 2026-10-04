@@ -25,6 +25,7 @@ import {
   MessageSquare,
   HelpCircle,
   Hash,
+  Hammer,
 } from "lucide-react";
 
 export default function ProjectDetailPage({
@@ -148,6 +149,16 @@ export default function ProjectDetailPage({
             <Sparkles className="w-4 h-4 text-[#E8B968]" />
             <span>Phase 6 Handoff Ready</span>
           </div>
+
+          {project.project_status === "ready_for_build" && (
+            <Link
+              href={`/dashboard/projects/${project.id}/build`}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E8B968] hover:bg-[#F5CC7A] text-[#141216] text-xs font-bold transition-colors shadow-sm"
+            >
+              <Hammer className="w-4 h-4" />
+              <span>Open Build Workspace</span>
+            </Link>
+          )}
         </div>
       </div>
 

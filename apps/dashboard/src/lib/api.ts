@@ -480,6 +480,38 @@ export const api = {
         body: JSON.stringify(payload),
       }),
   },
+  websiteBuilder: {
+    createSession: (projectId: string) =>
+      apiFetch<WebsiteBuildSession>(`/api/v1/projects/${projectId}/build-sessions`, {
+        method: "POST",
+      }),
+    listSessions: (projectId: string) =>
+      apiFetch<WebsiteBuildSessionListResponse>(
+        `/api/v1/projects/${projectId}/build-sessions`
+      ),
+    getSession: (sessionId: string) =>
+      apiFetch<WebsiteBuildSessionDetail>(`/api/v1/build-sessions/${sessionId}`),
+    planSession: (sessionId: string, notes?: string) =>
+      apiFetch<WebsiteBuildSession>(`/api/v1/build-sessions/${sessionId}/plan`, {
+        method: "POST",
+        body: JSON.stringify({ notes }),
+      }),
+    readySession: (sessionId: string, notes?: string) =>
+      apiFetch<WebsiteBuildSession>(`/api/v1/build-sessions/${sessionId}/ready`, {
+        method: "POST",
+        body: JSON.stringify({ notes }),
+      }),
+    pauseSession: (sessionId: string, reason?: string) =>
+      apiFetch<WebsiteBuildSession>(`/api/v1/build-sessions/${sessionId}/pause`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+    cancelSession: (sessionId: string, reason?: string) =>
+      apiFetch<WebsiteBuildSession>(`/api/v1/build-sessions/${sessionId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+  },
 };
 
 // ── PRD Types ─────────────────────────────────────────────────────────────────
@@ -626,4 +658,72 @@ export interface ProjectListResponse {
   ready_for_build_count: number;
   in_build_count: number;
   completed_count: number;
+}
+
+// ── Website Builder Types ────────────────────────────────────────────────────
+
+export type WebsiteBuildSessionStatus =
+  | "created"
+  | "planned"
+  | "ready"
+  | "in_progress"
+  | "paused"
+  | "failed"
+  | "completed"
+  | "cancelled";
+
+export type WebsiteBuildArtifactType =
+  | "prd_snapshot"
+  | "design_plan"
+  | "content_plan"
+  | "site_structure"
+  | "component_plan"
+  | "source_code"
+  | "asset"
+  | "build_log"
+  | "qa_report";
+
+export interface WebsiteBuildArtifact {
+  id: string;
+  build_session_id: string;
+  project_id: string;
+  artifact_type: WebsiteBuildArtifactType;
+  artifact_name: string;
+  artifact_version: number;
+  content_reference?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteBuildSession {
+  id: string;
+  project_id: string;
+  owner_id: string;
+  status: WebsiteBuildSessionStatus;
+  build_version: number;
+  started_at?: string | null;
+  completed_at?: string | null;
+  failure_reason?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteBuildSessionDetail extends WebsiteBuildSession {
+  artifacts: WebsiteBuildArtifact[];
+  project_name?: string | null;
+  project_slug?: string | null;
+  project_status?: string | null;
+  approved_prd_id?: string | null;
+  approved_prd_version?: number | null;
+  prd_summary?: Record<string, unknown> | null;
+}
+
+export interface WebsiteBuildSessionListResponse {
+  items: WebsiteBuildSession[];
+  total: number;
+  active_count: number;
+  completed_count: number;
+  failed_count: number;
 }
