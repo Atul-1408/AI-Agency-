@@ -424,4 +424,206 @@ export const api = {
         method: "POST",
       }),
   },
+
+  // Client Intelligence & PRD (Phase 5 Stage 5.3 Gate 4)
+  prd: {
+    generate: (conversation_id: string) =>
+      apiFetch<PRDDetail>("/api/v1/prds", {
+        method: "POST",
+        body: JSON.stringify({ conversation_id }),
+      }),
+
+    list: async (conversation_id?: string): Promise<PRD[]> => {
+      const qs = conversation_id ? `?conversation_id=${encodeURIComponent(conversation_id)}` : "";
+      return await apiFetch<PRD[]>(`/api/v1/prds${qs}`);
+    },
+
+    get: (id: string) =>
+      apiFetch<PRDDetail>(`/api/v1/prds/${id}`),
+
+    approve: (id: string, notes?: string) =>
+      apiFetch<PRD>(`/api/v1/prds/${id}/approve`, {
+        method: "POST",
+        body: JSON.stringify({ notes }),
+      }),
+
+    reject: (id: string, rejection_reason?: string) =>
+      apiFetch<PRD>(`/api/v1/prds/${id}/reject`, {
+        method: "POST",
+        body: JSON.stringify({ rejection_reason }),
+      }),
+  },
+  projects: {
+    list: (params?: { status?: string; search?: string }) => {
+      const q = new URLSearchParams();
+      if (params?.status) q.set("status", params.status);
+      if (params?.search) q.set("search", params.search);
+      const qs = q.toString() ? `?${q.toString()}` : "";
+      return apiFetch<ProjectListResponse>(`/api/v1/projects${qs}`);
+    },
+    get: (id: string) => apiFetch<ProjectDetail>(`/api/v1/projects/${id}`),
+    create: (payload: { approved_prd_id: string; custom_project_name?: string }) =>
+      apiFetch<Project>("/api/v1/projects", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    update: (
+      id: string,
+      payload: {
+        project_name?: string;
+        project_status?: string;
+        phase_metadata?: Record<string, unknown>;
+      }
+    ) =>
+      apiFetch<Project>(`/api/v1/projects/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+  },
 };
+
+// ── PRD Types ─────────────────────────────────────────────────────────────────
+
+export type PRDStatus =
+  | "draft"
+  | "pending_approval"
+  | "approved"
+  | "rejected"
+  | "superseded";
+
+export interface PRDRequirementReference {
+  id: string;
+  prd_id: string;
+  requirement_id: string;
+  requirement_version: number;
+  section_key: string;
+  source_message_id?: string | null;
+  evidence_excerpt?: string | null;
+  created_at: string;
+}
+
+export interface PRD {
+  id: string;
+  owner_email: string;
+  lead_id: string;
+  conversation_id: string;
+  version: number;
+  status: PRDStatus;
+  title: string;
+  executive_summary: string;
+  business_overview: Record<string, unknown>;
+  goals: string[];
+  target_audience?: unknown;
+  sitemap: Array<{ page: string; status?: string }>;
+  content_requirements: Record<string, unknown>;
+  functionality_requirements: Record<string, unknown>;
+  design_requirements: Record<string, unknown>;
+  branding_requirements: Record<string, unknown>;
+  contact_requirements: Record<string, unknown>;
+  technical_requirements: Record<string, unknown>;
+  timeline: Record<string, unknown>;
+  budget: Record<string, unknown>;
+  assumptions: string[];
+  open_questions: Array<Record<string, unknown>>;
+  requirement_traceability: Record<string, unknown>;
+  generated_at: string;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  rejected_at?: string | null;
+  rejected_by?: string | null;
+  rejection_reason?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PRDDetail extends PRD {
+  requirement_references: PRDRequirementReference[];
+  completeness?: {
+    conversation_id: string;
+    overall_completeness_percentage: number;
+    overall_status: string;
+    categories: Array<{
+      category: string;
+      status: string;
+      total_fields: number;
+      present_fields: string[];
+      missing_fields: string[];
+      completeness_percentage: number;
+    }>;
+    total_fields: number;
+    total_present: number;
+    total_missing: number;
+  };
+}
+
+// ── Project Types ─────────────────────────────────────────────────────────────
+
+export type ProjectStatus =
+  | "draft"
+  | "ready_for_build"
+  | "in_build"
+  | "qa"
+  | "ready_for_deployment"
+  | "deployed"
+  | "completed"
+  | "cancelled";
+
+export interface Project {
+  id: string;
+  owner_id: string;
+  lead_id: string;
+  conversation_id: string;
+  approved_prd_id: string;
+  prd_version: number;
+  project_name: string;
+  project_slug: string;
+  project_status: ProjectStatus;
+  project_source: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  phase_metadata: Record<string, unknown>;
+}
+
+export interface ProjectDetail extends Project {
+  business_name?: string | null;
+  business_domain?: string | null;
+  business_type?: string | null;
+  lead_info?: Record<string, unknown> | null;
+  conversation_summary?: {
+    conversation_id?: string | null;
+    status?: string | null;
+    message_count: number;
+    has_unreplied_inbound: boolean;
+    last_message_at?: string | null;
+  } | null;
+  prd_summary?: {
+    prd_id?: string | null;
+    version: number;
+    title?: string | null;
+    status?: string | null;
+    approved_at?: string | null;
+    approved_by?: string | null;
+    executive_summary?: string | null;
+    sitemap?: Array<{ page: string; status?: string }>;
+  } | null;
+  requirements_summary?: {
+    traceability_count: number;
+  } | null;
+  handoff_readiness?: {
+    phase_6_ready: boolean;
+    approved_prd_id: string;
+    approved_prd_version: number;
+    open_questions_count: number;
+    mapped_requirements_count: number;
+    status: string;
+  } | null;
+}
+
+export interface ProjectListResponse {
+  items: Project[];
+  total: number;
+  ready_for_build_count: number;
+  in_build_count: number;
+  completed_count: number;
+}

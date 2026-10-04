@@ -250,12 +250,14 @@ def build_thread_payload(
     reply_sender: str = "ceo@prospect-corp.com",
     reply_subject: str = "Re: Digital Growth Opportunities for Prospect Corp",
     reply_snippet: str = "Thanks for your email. Let us schedule a call next week.",
-    reply_date: str = "Fri, 03 Oct 2026 10:00:00 +0000",
+    reply_date: Optional[str] = None,
     in_reply_to: Optional[str] = None,
     references: Optional[str] = None,
     include_outbound: bool = True,
 ) -> Dict[str, Any]:
     """Helper to generate a realistic Google Gmail thread response."""
+    if reply_date is None:
+        reply_date = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%a, %d %b %Y %H:%M:%S +0000")
     messages = []
     if include_outbound:
         messages.append({

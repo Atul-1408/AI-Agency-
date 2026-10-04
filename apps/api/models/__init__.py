@@ -5,7 +5,7 @@ ONLY Phase 1 entities are defined here.
 Future phases add their own models when approved:
   - Phase 2: Lead, LeadResearch
   - Phase 3: OutreachThread, OutreachMessage
-  - Phase 5: ClientConversation, PRD
+  - Phase 5: ClientConversation (Stage 5.1), PRD (Stage 5.3)
   - Phase 6: Project, GeneratedFile
   - Phase 8: Deployment
 """
@@ -296,6 +296,32 @@ from models.follow_up import (
     InboundMessage,
 )
 
+# ── Phase 5 Models ────────────────────────────────────────────────────────────
+
+from models.client_intelligence import (
+    ClarificationStatus,
+    ClientClarification,
+    ClientConversation,
+    ClientConversationMessage,
+    ClientConversationStatus,
+    ClientPRD,
+    ClientPRDRequirementReference,
+    ClientRequirement,
+    ClientRequirementEvidence,
+    ClientRequirementVersion,
+    MessageDirection,
+    PRDStatus,
+    RequirementConfidence,
+    RequirementStatus,
+)
+
+# ── Phase 5.4 Models ──────────────────────────────────────────────────────────
+
+from models.project import (
+    Project,
+    ProjectStatus,
+)
+
 __all__ = [
     # Mixins
     "TimestampMixin",
@@ -332,6 +358,22 @@ __all__ = [
     "FollowUpStepStatus",
     "FollowUpStopReason",
     "InboundMessage",
+    # Phase 5
+    "ClientConversation",
+    "ClientConversationMessage",
+    "ClientConversationStatus",
+    "MessageDirection",
+    "ClientRequirement",
+    "ClientRequirementEvidence",
+    "ClientRequirementVersion",
+    "ClientClarification",
+    "RequirementStatus",
+    "RequirementConfidence",
+    "ClarificationStatus",
+    "ClientPRD",
+    "ClientPRDRequirementReference",
+    "PRDStatus",
+    # Phase 5.4
+    "Project",
+    "ProjectStatus",
 ]
-
-

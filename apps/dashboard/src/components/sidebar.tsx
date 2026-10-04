@@ -13,6 +13,7 @@ import {
   Check,
   Circle,
   Sparkles,
+  FolderKanban,
 } from "lucide-react";
 
 interface NavItem {
@@ -26,6 +27,7 @@ const navItems: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: Home },
   { href: "/dashboard/leads", label: "Leads", icon: LayoutGrid },
   { href: "/dashboard/outreach", label: "Outreach", icon: Mail },
+  { href: "/dashboard/projects", label: "Projects", icon: FolderKanban },
   { href: "/dashboard/approvals", label: "Approvals", icon: CheckSquare },
   { href: "/dashboard/runs", label: "Agent Runs", icon: Activity },
   { href: "/dashboard/settings", label: "Settings", icon: Settings },
