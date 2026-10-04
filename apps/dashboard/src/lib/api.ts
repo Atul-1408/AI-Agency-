@@ -526,8 +526,24 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
+    createBlueprint: (generationId: string) =>
+      apiFetch<DesignBlueprint>(`/api/v1/generations/${generationId}/blueprints`, {
+        method: "POST",
+      }),
+    listBlueprints: (generationId: string) =>
+      apiFetch<DesignBlueprintListResponse>(
+        `/api/v1/generations/${generationId}/blueprints`
+      ),
+    getBlueprint: (blueprintId: string) =>
+      apiFetch<DesignBlueprintDetail>(`/api/v1/design-blueprints/${blueprintId}`),
+    cancelBlueprint: (blueprintId: string, reason?: string) =>
+      apiFetch<DesignBlueprint>(`/api/v1/design-blueprints/${blueprintId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
   },
 };
+
 
 
 // ── PRD Types ─────────────────────────────────────────────────────────────────
@@ -877,6 +893,194 @@ export interface WebsiteGenerationDetail extends WebsiteGeneration {
 
 export interface WebsiteGenerationListResponse {
   items: WebsiteGeneration[];
+  total: number;
+  completed_count: number;
+  failed_count: number;
+  active_count: number;
+}
+
+// ── Phase 6.3 Design Blueprint Types ──────────────────────────────────────────
+
+export type DesignBlueprintStatus =
+  | "pending"
+  | "generating"
+  | "validating"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface DesignTokens {
+  colors: Record<string, string>;
+  typography: {
+    heading_font: string;
+    body_font: string;
+    mono_font: string;
+    heading_weights: string[];
+    body_weights: string[];
+    scale: Record<string, string>;
+  };
+  spacing: Record<string, string>;
+  radius: Record<string, string>;
+  shadows: Record<string, string>;
+  container: {
+    max_width: string;
+    gutters: string;
+  };
+}
+
+export interface ResponsiveBreakpoint {
+  name: string;
+  min_width: string;
+  layout_behavior: string;
+  typography_behavior: string;
+  spacing_behavior: string;
+  navigation_behavior: string;
+  component_behavior: string;
+}
+
+export interface ComponentSpecification {
+  component_id: string;
+  component_name: string;
+  category: string;
+  purpose: string;
+  variants: string[];
+  required_props: string[];
+  optional_props: string[];
+  accessibility_requirements: string[];
+  responsive_behavior: string;
+  allowed_usage: string;
+  dependencies: string[];
+}
+
+export interface SectionBlueprint {
+  section_id: string;
+  section_type: string;
+  purpose: string;
+  component_refs: string[];
+  content_refs: string[];
+  layout: string;
+  alignment: string;
+  spacing: string;
+  responsive_behavior: string;
+  visual_priority: "high" | "medium" | "low";
+  accessibility: string;
+  interaction: string;
+}
+
+export interface PageBlueprint {
+  page_id: string;
+  route: string;
+  name: string;
+  purpose: string;
+  layout_type: string;
+  section_order: string[];
+  sections: SectionBlueprint[];
+  component_refs: string[];
+  navigation_refs: string[];
+  seo: Record<string, string>;
+  responsive_rules: string[];
+  accessibility_rules: string[];
+}
+
+export interface SiteArchitecture {
+  root_route: string;
+  pages: string[];
+  navigation_flow: Array<{ from_route: string; to_route: string; label: string }>;
+  footer_links: Array<{ label: string; route: string }>;
+  global_components: string[];
+  page_dependencies: Record<string, string[]>;
+}
+
+export interface AssetRequirement {
+  asset_id: string;
+  type: "image" | "video" | "icon" | "logo" | "illustration" | "font";
+  purpose: string;
+  page: string;
+  section: string;
+  required: boolean;
+  source: string;
+  dimensions?: string | null;
+  aspect_ratio?: string | null;
+  accessibility_alt_requirement: string;
+  placeholder_allowed: boolean;
+}
+
+export interface InteractionSpecification {
+  interaction_id: string;
+  name: string;
+  trigger: string;
+  behavior: string;
+  duration: string;
+  reduced_motion_behavior: string;
+  accessibility_behavior: string;
+}
+
+export interface AccessibilityBlueprint {
+  keyboard_navigation: string[];
+  focus_behavior: string;
+  semantic_structure: string[];
+  heading_hierarchy: string[];
+  form_labels: string[];
+  alt_text_requirements: string[];
+  color_contrast_requirement: string;
+  reduced_motion_behavior: string;
+  screen_reader_considerations: string[];
+}
+
+export interface BlueprintContentMapping {
+  source: string;
+  page: string;
+  section: string;
+  content_type: string;
+  required: boolean;
+  status: "confirmed" | "generated_draft" | "unknown" | "needs_client_input";
+}
+
+export interface WebsiteDesignBlueprint {
+  blueprint_version: string;
+  source_generation_id: string;
+  source_generation_version: number;
+  project_name: string;
+  project_slug: string;
+  design_tokens: DesignTokens;
+  responsive_breakpoints: ResponsiveBreakpoint[];
+  component_taxonomy: ComponentSpecification[];
+  site_architecture: SiteArchitecture;
+  pages: PageBlueprint[];
+  asset_requirements: AssetRequirement[];
+  interactions: InteractionSpecification[];
+  accessibility: AccessibilityBlueprint;
+  content_mapping: BlueprintContentMapping[];
+  implementation_constraints: string[];
+}
+
+export interface DesignBlueprint {
+  id: string;
+  build_session_id: string;
+  project_id: string;
+  owner_id: string;
+  source_generation_id: string;
+  source_generation_version: number;
+  blueprint_version: number;
+  status: DesignBlueprintStatus;
+  specification_artifact_id?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DesignBlueprintDetail extends DesignBlueprint {
+  blueprint?: WebsiteDesignBlueprint | null;
+  project_name?: string | null;
+  project_slug?: string | null;
+}
+
+export interface DesignBlueprintListResponse {
+  items: DesignBlueprint[];
   total: number;
   completed_count: number;
   failed_count: number;

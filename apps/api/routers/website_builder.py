@@ -56,8 +56,24 @@ from services.website_generation_service import (
     WebsiteGenerationService,
     WebsiteGenerationSessionNotFoundError,
 )
+from schemas.design_blueprint import (
+    DesignBlueprintCancelRequest,
+    DesignBlueprintDetailResponse,
+    DesignBlueprintListResponse,
+    DesignBlueprintResponse,
+)
+from services.design_blueprint_service import (
+    DesignBlueprintEligibilityError,
+    DesignBlueprintFailedError,
+    DesignBlueprintNotFoundError,
+    DesignBlueprintOwnershipError,
+    DesignBlueprintPRDMismatchError,
+    DesignBlueprintService,
+    DesignBlueprintValidationError,
+)
 
 router = APIRouter()
+
 log = structlog.get_logger(__name__)
 
 
@@ -571,5 +587,212 @@ async def cancel_website_generation(
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except WebsiteGenerationEligibilityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+# ── Phase 6.3 Design Blueprint Endpoints ────────────────────────────────────────
+
+
+@router.post(
+    "/generations/{generation_id}/blueprints",
+    response_model=DesignBlueprintResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate an implementation-ready design blueprint from a completed generation",
+)
+async def create_design_blueprint(
+    generation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> DesignBlueprintResponse:
+    """Generate DesignBlueprint from validated WebsiteSpecification and PRD."""
+    verify_owner_access(owner_email)
+    try:
+        blueprint = await DesignBlueprintService.create_design_blueprint(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+        )
+        return DesignBlueprintResponse(
+            id=blueprint.id,
+            build_session_id=blueprint.build_session_id,
+            project_id=blueprint.project_id,
+            owner_id=blueprint.owner_id,
+            source_generation_id=blueprint.source_generation_id,
+            source_generation_version=blueprint.source_generation_version,
+            blueprint_version=blueprint.blueprint_version,
+            status=blueprint.status.value,
+            specification_artifact_id=blueprint.specification_artifact_id,
+            error_code=blueprint.error_code,
+            error_message=blueprint.error_message,
+            started_at=blueprint.started_at,
+            completed_at=blueprint.completed_at,
+            metadata=blueprint.blueprint_metadata,
+            created_at=blueprint.created_at,
+            updated_at=blueprint.updated_at,
+        )
+    except DesignBlueprintNotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DesignBlueprintOwnershipError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except (DesignBlueprintPRDMismatchError, DesignBlueprintEligibilityError) as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except DesignBlueprintValidationError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except DesignBlueprintFailedError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
+@router.get(
+    "/generations/{generation_id}/blueprints",
+    response_model=DesignBlueprintListResponse,
+    summary="List all design blueprints for a generation",
+)
+async def list_design_blueprints(
+    generation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> DesignBlueprintListResponse:
+    """Retrieve all design blueprints created for the specified generation."""
+    verify_owner_access(owner_email)
+    try:
+        items = await DesignBlueprintService.list_blueprints_for_generation(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+        )
+        responses = [
+            DesignBlueprintResponse(
+                id=b.id,
+                build_session_id=b.build_session_id,
+                project_id=b.project_id,
+                owner_id=b.owner_id,
+                source_generation_id=b.source_generation_id,
+                source_generation_version=b.source_generation_version,
+                blueprint_version=b.blueprint_version,
+                status=b.status.value,
+                specification_artifact_id=b.specification_artifact_id,
+                error_code=b.error_code,
+                error_message=b.error_message,
+                started_at=b.started_at,
+                completed_at=b.completed_at,
+                metadata=b.blueprint_metadata,
+                created_at=b.created_at,
+                updated_at=b.updated_at,
+            )
+            for b in items
+        ]
+        completed = sum(1 for b in items if b.status.value == "completed")
+        failed = sum(1 for b in items if b.status.value == "failed")
+        active = sum(1 for b in items if b.status.value in ("pending", "generating", "validating"))
+
+        return DesignBlueprintListResponse(
+            items=responses,
+            total=len(responses),
+            completed_count=completed,
+            failed_count=failed,
+            active_count=active,
+        )
+    except DesignBlueprintNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DesignBlueprintOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/design-blueprints/{blueprint_id}",
+    response_model=DesignBlueprintDetailResponse,
+    summary="Retrieve details and blueprint payload for a design blueprint",
+)
+async def get_design_blueprint(
+    blueprint_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> DesignBlueprintDetailResponse:
+    """Retrieve full design blueprint details including the structured WebsiteDesignBlueprint."""
+    verify_owner_access(owner_email)
+    try:
+        blueprint, bp_obj = await DesignBlueprintService.get_design_blueprint(
+            db=db,
+            blueprint_id=blueprint_id,
+            owner_id=owner_email,
+        )
+        return DesignBlueprintDetailResponse(
+            id=blueprint.id,
+            build_session_id=blueprint.build_session_id,
+            project_id=blueprint.project_id,
+            owner_id=blueprint.owner_id,
+            source_generation_id=blueprint.source_generation_id,
+            source_generation_version=blueprint.source_generation_version,
+            blueprint_version=blueprint.blueprint_version,
+            status=blueprint.status.value,
+            specification_artifact_id=blueprint.specification_artifact_id,
+            error_code=blueprint.error_code,
+            error_message=blueprint.error_message,
+            started_at=blueprint.started_at,
+            completed_at=blueprint.completed_at,
+            metadata=blueprint.blueprint_metadata,
+            created_at=blueprint.created_at,
+            updated_at=blueprint.updated_at,
+            blueprint=bp_obj,
+            project_name=blueprint.project.project_name if blueprint.project else None,
+            project_slug=blueprint.project.project_slug if blueprint.project else None,
+        )
+    except DesignBlueprintNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DesignBlueprintOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post(
+    "/design-blueprints/{blueprint_id}/cancel",
+    response_model=DesignBlueprintResponse,
+    summary="Cancel an active design blueprint generation",
+)
+async def cancel_design_blueprint(
+    blueprint_id: uuid.UUID,
+    request: Optional[DesignBlueprintCancelRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> DesignBlueprintResponse:
+    """Cancel a pending, generating, or validating design blueprint generation."""
+    verify_owner_access(owner_email)
+    try:
+        blueprint = await DesignBlueprintService.cancel_design_blueprint(
+            db=db,
+            blueprint_id=blueprint_id,
+            owner_id=owner_email,
+            reason=request.reason if request else None,
+        )
+        return DesignBlueprintResponse(
+            id=blueprint.id,
+            build_session_id=blueprint.build_session_id,
+            project_id=blueprint.project_id,
+            owner_id=blueprint.owner_id,
+            source_generation_id=blueprint.source_generation_id,
+            source_generation_version=blueprint.source_generation_version,
+            blueprint_version=blueprint.blueprint_version,
+            status=blueprint.status.value,
+            specification_artifact_id=blueprint.specification_artifact_id,
+            error_code=blueprint.error_code,
+            error_message=blueprint.error_message,
+            started_at=blueprint.started_at,
+            completed_at=blueprint.completed_at,
+            metadata=blueprint.blueprint_metadata,
+            created_at=blueprint.created_at,
+            updated_at=blueprint.updated_at,
+        )
+    except DesignBlueprintNotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except DesignBlueprintOwnershipError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except DesignBlueprintEligibilityError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))

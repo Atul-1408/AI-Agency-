@@ -93,6 +93,7 @@ class WebsiteBuildArtifactType(str, enum.Enum):
     """
     PRD_SNAPSHOT          = "prd_snapshot"
     WEBSITE_SPECIFICATION = "website_specification"
+    DESIGN_BLUEPRINT      = "design_blueprint"
     DESIGN_PLAN           = "design_plan"
     CONTENT_PLAN          = "content_plan"
     SITE_STRUCTURE        = "site_structure"
@@ -106,6 +107,18 @@ class WebsiteBuildArtifactType(str, enum.Enum):
 class WebsiteGenerationStatus(str, enum.Enum):
     """
     Lifecycle status of an AI website specification generation attempt.
+    """
+    PENDING     = "pending"
+    GENERATING  = "generating"
+    VALIDATING  = "validating"
+    COMPLETED   = "completed"
+    FAILED      = "failed"
+    CANCELLED   = "cancelled"
+
+
+class DesignBlueprintStatus(str, enum.Enum):
+    """
+    Lifecycle status of a Phase 6.3 Design System and Site Architecture Blueprint generation.
     """
     PENDING     = "pending"
     GENERATING  = "generating"
@@ -253,4 +266,65 @@ class WebsiteGeneration(UUIDPKMixin, TimestampMixin, Base):
         lazy="select",
     )
     project: Mapped["Project"] = relationship(lazy="select")
+    specification_artifact: Mapped[Optional["WebsiteBuildArtifact"]] = relationship(lazy="select")
+    blueprints: Mapped[List["DesignBlueprint"]] = relationship(
+        back_populates="source_generation",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
+
+class DesignBlueprint(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Phase 6 Stage 6.3 — Design System + Site Architecture Blueprint.
+    Structured implementation-ready blueprint mapping tokens, component taxonomy,
+    page architecture, responsive behavior, asset requirements, and accessibility rules.
+    """
+    __tablename__ = "design_blueprints"
+    __table_args__ = (
+        Index("ix_design_blueprints_generation_id", "source_generation_id"),
+        Index("ix_design_blueprints_session_id", "build_session_id"),
+        Index("ix_design_blueprints_project_id", "project_id"),
+        Index("ix_design_blueprints_owner_id", "owner_id"),
+        Index("ix_design_blueprints_status", "status"),
+    )
+
+    build_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_generation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_generations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_generation_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    blueprint_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[DesignBlueprintStatus] = mapped_column(
+        Enum(DesignBlueprintStatus, name="design_blueprint_status", native_enum=False),
+        default=DesignBlueprintStatus.PENDING,
+        nullable=False,
+    )
+    specification_artifact_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_artifacts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    blueprint_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, default=dict, nullable=False)
+
+    # Relationships
+    build_session: Mapped["WebsiteBuildSession"] = relationship(lazy="select")
+    project: Mapped["Project"] = relationship(lazy="select")
+    source_generation: Mapped["WebsiteGeneration"] = relationship(back_populates="blueprints", lazy="select")
     specification_artifact: Mapped[Optional["WebsiteBuildArtifact"]] = relationship(lazy="select")

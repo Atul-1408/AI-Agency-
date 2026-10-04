@@ -10,6 +10,9 @@ import {
   type WebsiteGeneration,
   type WebsiteGenerationDetail,
   type WebsiteSpecification,
+  type DesignBlueprint,
+  type DesignBlueprintDetail,
+  type WebsiteDesignBlueprint,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -36,7 +39,14 @@ import {
   Code,
   Layout,
   ExternalLink,
+  Box,
+  Sliders,
+  Eye,
+  Type,
+  Maximize2,
+  CheckSquare,
 } from "lucide-react";
+
 
 export default function WebsiteBuildWorkspacePage({
   params,
@@ -53,11 +63,33 @@ export default function WebsiteBuildWorkspacePage({
   const [selectedGeneration, setSelectedGeneration] = useState<WebsiteGenerationDetail | null>(null);
   const [activeSpecTab, setActiveSpecTab] = useState<"pages" | "navigation" | "design" | "content" | "raw">("pages");
 
+  // Phase 6.3 Design Blueprint State
+  const [blueprints, setBlueprints] = useState<DesignBlueprint[]>([]);
+  const [selectedBlueprint, setSelectedBlueprint] = useState<DesignBlueprintDetail | null>(null);
+  const [blueprintLoading, setBlueprintLoading] = useState(false);
+  const [activeBlueprintTab, setActiveBlueprintTab] = useState<"tokens" | "components" | "pages" | "assets" | "a11y" | "raw">("tokens");
+
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [genLoading, setGenLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  const loadBlueprintsForGen = useCallback(async (generationId: string) => {
+    try {
+      const bpList = await api.websiteBuilder.listBlueprints(generationId);
+      setBlueprints(bpList.items);
+      if (bpList.items.length > 0) {
+        const bpDetail = await api.websiteBuilder.getBlueprint(bpList.items[0].id);
+        setSelectedBlueprint(bpDetail);
+      } else {
+        setSelectedBlueprint(null);
+      }
+    } catch {
+      setBlueprints([]);
+      setSelectedBlueprint(null);
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     try {
@@ -88,20 +120,26 @@ export default function WebsiteBuildWorkspacePage({
         if (gensList.items.length > 0) {
           const genDetail = await api.websiteBuilder.getGeneration(gensList.items[0].id);
           setSelectedGeneration(genDetail);
+          await loadBlueprintsForGen(genDetail.id);
         } else {
           setSelectedGeneration(null);
+          setBlueprints([]);
+          setSelectedBlueprint(null);
         }
       } else {
         setActiveSession(null);
         setGenerations([]);
         setSelectedGeneration(null);
+        setBlueprints([]);
+        setSelectedBlueprint(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load build workspace data.");
     } finally {
       setLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, loadBlueprintsForGen]);
+
 
   useEffect(() => {
     loadData();
@@ -176,6 +214,7 @@ export default function WebsiteBuildWorkspacePage({
       setActionLoading(true);
       const detail = await api.websiteBuilder.getGeneration(genId);
       setSelectedGeneration(detail);
+      await loadBlueprintsForGen(detail.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load generation detail.");
     } finally {
@@ -195,8 +234,11 @@ export default function WebsiteBuildWorkspacePage({
       if (gensList.items.length > 0) {
         const genDetail = await api.websiteBuilder.getGeneration(gensList.items[0].id);
         setSelectedGeneration(genDetail);
+        await loadBlueprintsForGen(genDetail.id);
       } else {
         setSelectedGeneration(null);
+        setBlueprints([]);
+        setSelectedBlueprint(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session details.");
@@ -204,6 +246,35 @@ export default function WebsiteBuildWorkspacePage({
       setActionLoading(false);
     }
   };
+
+  const handleTriggerBlueprint = async () => {
+    if (!selectedGeneration || selectedGeneration.status !== "completed") return;
+    try {
+      setBlueprintLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const newBp = await api.websiteBuilder.createBlueprint(selectedGeneration.id);
+      setSuccessMessage(`AI Design Blueprint v${newBp.blueprint_version} generated successfully.`);
+      await loadBlueprintsForGen(selectedGeneration.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate design blueprint.");
+    } finally {
+      setBlueprintLoading(false);
+    }
+  };
+
+  const handleSelectBlueprint = async (blueprintId: string) => {
+    try {
+      setActionLoading(true);
+      const detail = await api.websiteBuilder.getBlueprint(blueprintId);
+      setSelectedBlueprint(detail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load blueprint details.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
 
   if (loading) {
     return (
@@ -262,6 +333,8 @@ export default function WebsiteBuildWorkspacePage({
   };
 
   const spec: WebsiteSpecification | undefined = selectedGeneration?.specification || undefined;
+  const bp: WebsiteDesignBlueprint | undefined = selectedBlueprint?.blueprint || undefined;
+
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-16">
@@ -796,10 +869,430 @@ export default function WebsiteBuildWorkspacePage({
               )}
             </div>
           )}
+
+          {/* AI Design Blueprint Generation Trigger (Phase 6.3) */}
+          {selectedGeneration && selectedGeneration.status === "completed" && (
+            <div className="p-5 rounded-xl bg-gradient-to-r from-[#1B191E] via-[#161B22] to-[#141216] border border-cyan-500/30 space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <Box className="w-4 h-4 text-cyan-400" />
+                    <h3 className="text-sm font-bold text-[#F5F1EA]">
+                      AI Design System + Site Architecture Engine
+                    </h3>
+                  </div>
+                  <p className="text-xs text-[#77717C]">
+                    Synthesize design tokens, component taxonomy, section blueprints, and accessibility rules from Spec v{selectedGeneration.generation_version}.
+                  </p>
+                </div>
+
+                <button
+                  onClick={handleTriggerBlueprint}
+                  disabled={blueprintLoading || actionLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-[#0C1017] text-xs font-bold transition-all shadow-md disabled:opacity-50 shrink-0"
+                >
+                  <Box className={`w-4 h-4 ${blueprintLoading ? "animate-spin" : ""}`} />
+                  <span>{blueprintLoading ? "Generating Blueprint..." : "Generate Design Blueprint"}</span>
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* AI Design Blueprint Viewer (Phase 6.3 Output) */}
+          {selectedBlueprint && (
+            <div className="p-6 rounded-2xl bg-[#131215] border border-cyan-500/30 space-y-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#242126] pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">
+                      AI Design Blueprint
+                    </span>
+                    <span className="text-xs text-[#77717C]">•</span>
+                    <span className="text-xs font-mono text-[#F5F1EA]">
+                      Blueprint v{selectedBlueprint.blueprint_version}
+                    </span>
+                    <span className="text-xs text-[#77717C]">•</span>
+                    <span className="text-[11px] text-[#77717C]">
+                      Anchored to Spec v{selectedBlueprint.source_generation_version}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-[#F5F1EA] mt-0.5">
+                    {bp?.project_name || selectedBlueprint.project_name || "Design System Blueprint"}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold border uppercase ${getStatusBadge(
+                      selectedBlueprint.status
+                    )}`}
+                  >
+                    {selectedBlueprint.status}
+                  </span>
+                  {selectedBlueprint.specification_artifact_id && (
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono bg-cyan-950/40 text-cyan-300 border border-cyan-700/40">
+                      ARTIFACT RECORDED
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Informational Scope Badge */}
+              <div className="p-3 rounded-xl bg-cyan-950/20 border border-cyan-500/20 text-xs text-cyan-200/80 flex items-center gap-2">
+                <Info className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>
+                  Implementation-ready design system blueprint specifying tokens, component catalog, and responsive layouts. Not a finished website or executable code.
+                </span>
+              </div>
+
+              {bp ? (
+                <div className="space-y-6">
+                  {/* Metric Chips */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Components</span>
+                      <p className="text-sm font-bold text-[#F5F1EA] mt-0.5">{bp.component_taxonomy?.length ?? 0}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Pages Planned</span>
+                      <p className="text-sm font-bold text-[#F5F1EA] mt-0.5">{bp.pages?.length ?? 0}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Asset Specs</span>
+                      <p className="text-sm font-bold text-[#F5F1EA] mt-0.5">{bp.asset_requirements?.length ?? 0}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Breakpoints</span>
+                      <p className="text-sm font-bold text-[#F5F1EA] mt-0.5">{bp.responsive_breakpoints?.length ?? 0}</p>
+                    </div>
+                  </div>
+
+                  {/* Blueprint Tabs */}
+                  <div className="flex flex-wrap gap-2 border-b border-[#242126] pb-3 text-xs font-semibold">
+                    {[
+                      { id: "tokens", label: "Design Tokens", icon: Palette },
+                      { id: "components", label: `Component Taxonomy (${bp.component_taxonomy?.length ?? 0})`, icon: Box },
+                      { id: "pages", label: `Page Architecture (${bp.pages?.length ?? 0})`, icon: Layout },
+                      { id: "assets", label: `Asset Requirements (${bp.asset_requirements?.length ?? 0})`, icon: Eye },
+                      { id: "a11y", label: "Accessibility & Motion", icon: ShieldCheck },
+                      { id: "raw", label: "Blueprint JSON", icon: Code },
+                    ].map((tab) => {
+                      const Icon = tab.icon;
+                      const isActive = activeBlueprintTab === tab.id;
+                      return (
+                        <button
+                          key={tab.id}
+                          onClick={() => setActiveBlueprintTab(tab.id as any)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border transition-all ${
+                            isActive
+                              ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/40"
+                              : "bg-[#1B191E] text-[#77717C] border-[#242126] hover:text-[#A9A4AE]"
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                          <span>{tab.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Tab 1: Design Tokens */}
+                  {activeBlueprintTab === "tokens" && bp.design_tokens && (
+                    <div className="space-y-6">
+                      {/* Color Palette */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold text-[#F5F1EA] uppercase tracking-wider">Color System</h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3">
+                          {Object.entries(bp.design_tokens.colors || {}).map(([key, val]) => (
+                            <div key={key} className="p-3 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                              <div
+                                className="w-full h-8 rounded-lg border border-white/10 shadow-inner"
+                                style={{ backgroundColor: val }}
+                              />
+                              <div>
+                                <p className="text-[11px] font-semibold text-[#F5F1EA] capitalize">{key}</p>
+                                <p className="text-[10px] font-mono text-[#77717C]">{val}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Typography System */}
+                      <div className="space-y-2">
+                        <h4 className="text-xs font-bold text-[#F5F1EA] uppercase tracking-wider">Typography System</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                            <span className="text-[10px] text-[#77717C] uppercase font-semibold">Heading Font</span>
+                            <p className="text-xs font-bold text-[#F5F1EA] mt-1">{bp.design_tokens.typography.heading_font}</p>
+                            <p className="text-[10px] text-[#77717C] mt-1">Weights: {bp.design_tokens.typography.heading_weights?.join(", ")}</p>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                            <span className="text-[10px] text-[#77717C] uppercase font-semibold">Body Font</span>
+                            <p className="text-xs font-bold text-[#F5F1EA] mt-1">{bp.design_tokens.typography.body_font}</p>
+                            <p className="text-[10px] text-[#77717C] mt-1">Weights: {bp.design_tokens.typography.body_weights?.join(", ")}</p>
+                          </div>
+                          <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                            <span className="text-[10px] text-[#77717C] uppercase font-semibold">Mono Font</span>
+                            <p className="text-xs font-mono font-bold text-[#F5F1EA] mt-1">{bp.design_tokens.typography.mono_font}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Spacing, Radius, Container */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                          <span className="text-[10px] text-[#77717C] uppercase font-semibold">Spacing Scale</span>
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {Object.entries(bp.design_tokens.spacing || {}).map(([k, v]) => (
+                              <span key={k} className="px-2 py-0.5 rounded bg-[#242126] text-[10px] font-mono text-[#F5F1EA]">
+                                {k}: {v}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                          <span className="text-[10px] text-[#77717C] uppercase font-semibold">Border Radius</span>
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {Object.entries(bp.design_tokens.radius || {}).map(([k, v]) => (
+                              <span key={k} className="px-2 py-0.5 rounded bg-[#242126] text-[10px] font-mono text-[#F5F1EA]">
+                                {k}: {v}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                          <span className="text-[10px] text-[#77717C] uppercase font-semibold">Container</span>
+                          <div className="space-y-1 text-xs text-[#A9A4AE] pt-1">
+                            <p>Max Width: <strong className="text-[#F5F1EA]">{bp.design_tokens.container?.max_width}</strong></p>
+                            <p>Gutters: <strong className="text-[#F5F1EA]">{bp.design_tokens.container?.gutters}</strong></p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tab 2: Component Taxonomy */}
+                  {activeBlueprintTab === "components" && (
+                    <div className="space-y-3">
+                      {bp.component_taxonomy?.map((comp) => (
+                        <div key={comp.component_id} className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-xs text-cyan-300">{comp.component_id}</span>
+                              <span className="text-xs font-bold text-[#F5F1EA]">{comp.component_name}</span>
+                            </div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-[#242126] text-[#A9A4AE]">
+                              {comp.category}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#A9A4AE]">{comp.purpose}</p>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 text-[11px] text-[#77717C]">
+                            <div>
+                              <span className="font-semibold text-[#A9A4AE]">Variants: </span>
+                              <span className="font-mono">{comp.variants?.join(", ") || "default"}</span>
+                            </div>
+                            <div>
+                              <span className="font-semibold text-[#A9A4AE]">Responsive: </span>
+                              <span>{comp.responsive_behavior}</span>
+                            </div>
+                            <div className="sm:col-span-2">
+                              <span className="font-semibold text-[#A9A4AE]">A11y: </span>
+                              <span>{comp.accessibility_requirements?.join("; ") || "Standard"}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tab 3: Page Architecture */}
+                  {activeBlueprintTab === "pages" && (
+                    <div className="space-y-4">
+                      {bp.pages?.map((p) => (
+                        <div key={p.page_id} className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <h4 className="text-sm font-bold text-[#F5F1EA]">{p.name}</h4>
+                              <span className="font-mono text-xs text-cyan-400">{p.route}</span>
+                            </div>
+                            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#242126] text-[#A9A4AE]">
+                              {p.layout_type}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#A9A4AE]">{p.purpose}</p>
+
+                          <div className="space-y-2 pt-2">
+                            <span className="text-[10px] font-semibold text-[#77717C] uppercase tracking-wider block">
+                              Sections Hierarchy ({p.sections?.length ?? 0})
+                            </span>
+                            <div className="grid grid-cols-1 gap-2">
+                              {p.sections?.map((sec, idx) => (
+                                <div key={sec.section_id} className="p-2.5 rounded-lg bg-[#141216] border border-[#242126] text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                                  <div>
+                                    <span className="font-mono text-cyan-300 mr-2">#{idx + 1} {sec.section_id}</span>
+                                    <span className="text-[#A9A4AE]">({sec.section_type})</span>
+                                    <p className="text-[11px] text-[#77717C] mt-0.5">{sec.purpose}</p>
+                                  </div>
+                                  <div className="flex flex-wrap gap-1">
+                                    {sec.component_refs?.map((ref) => (
+                                      <span key={ref} className="px-1.5 py-0.5 rounded bg-cyan-950/60 text-cyan-300 border border-cyan-800/40 text-[10px] font-mono">
+                                        {ref}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tab 4: Asset Requirements */}
+                  {activeBlueprintTab === "assets" && (
+                    <div className="space-y-3">
+                      {bp.asset_requirements?.map((asset) => (
+                        <div key={asset.asset_id} className="p-3 rounded-xl bg-[#1B191E] border border-[#242126] text-xs space-y-1">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-cyan-300">{asset.asset_id}</span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-[#242126] text-[#A9A4AE]">
+                                {asset.type}
+                              </span>
+                            </div>
+                            <span className="text-[10px] font-mono text-[#77717C]">
+                              Page: {asset.page} • Section: {asset.section}
+                            </span>
+                          </div>
+                          <p className="text-xs text-[#A9A4AE]">{asset.purpose}</p>
+                          <div className="flex flex-wrap gap-3 pt-1 text-[11px] text-[#77717C]">
+                            {asset.dimensions && <span>Dimensions: <strong className="text-[#F5F1EA]">{asset.dimensions}</strong></span>}
+                            {asset.aspect_ratio && <span>Aspect: <strong className="text-[#F5F1EA]">{asset.aspect_ratio}</strong></span>}
+                            <span>Alt Requirement: <span className="italic text-[#A9A4AE]">{asset.accessibility_alt_requirement}</span></span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tab 5: Accessibility & Motion */}
+                  {activeBlueprintTab === "a11y" && (
+                    <div className="space-y-4 text-xs">
+                      {bp.accessibility && (
+                        <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
+                          <h4 className="font-bold text-[#F5F1EA] uppercase tracking-wider text-[11px]">Accessibility Blueprint</h4>
+                          <div className="space-y-2 text-[#A9A4AE]">
+                            <div>
+                              <span className="font-semibold text-[#F5F1EA]">Focus & Contrast: </span>
+                              <span>{bp.accessibility.focus_behavior} • {bp.accessibility.color_contrast_requirement}</span>
+                            </div>
+                            <div>
+                              <span className="font-semibold text-[#F5F1EA]">Keyboard Navigation: </span>
+                              <span>{bp.accessibility.keyboard_navigation?.join("; ")}</span>
+                            </div>
+                            <div>
+                              <span className="font-semibold text-[#F5F1EA]">Semantic & Headings: </span>
+                              <span>{bp.accessibility.heading_hierarchy?.join("; ")}</span>
+                            </div>
+                            <div>
+                              <span className="font-semibold text-[#F5F1EA]">Reduced Motion: </span>
+                              <span>{bp.accessibility.reduced_motion_behavior}</span>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {bp.interactions && bp.interactions.length > 0 && (
+                        <div className="space-y-2">
+                          <h4 className="font-bold text-[#F5F1EA] uppercase tracking-wider text-[11px]">Interactions & Motion</h4>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                            {bp.interactions.map((inter) => (
+                              <div key={inter.interaction_id} className="p-3 rounded-xl bg-[#1B191E] border border-[#242126] space-y-1">
+                                <span className="font-mono text-cyan-300 font-bold">{inter.interaction_id}</span>
+                                <p className="text-[#F5F1EA] font-semibold">{inter.name}</p>
+                                <p className="text-[11px] text-[#77717C]">Trigger: {inter.trigger} • Duration: {inter.duration}</p>
+                                <p className="text-[11px] text-[#A9A4AE]">Behavior: {inter.behavior}</p>
+                                <p className="text-[10px] text-[#77717C]">Reduced motion: {inter.reduced_motion_behavior}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab 6: Raw JSON */}
+                  {activeBlueprintTab === "raw" && (
+                    <pre className="p-4 rounded-xl bg-[#0C0B0D] border border-[#242126] text-[11px] font-mono text-[#A9A4AE] overflow-x-auto max-h-[450px]">
+                      {JSON.stringify(bp, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              ) : (
+                <div className="p-6 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                  {selectedBlueprint.status === "failed" ? (
+                    <span className="text-red-400">Blueprint generation failed: {selectedBlueprint.error_message}</span>
+                  ) : (
+                    <span>Blueprint is being processed...</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Right Column: Generation History & Session Baseline */}
+        {/* Right Column: Generation History, Blueprint History & Session Baseline */}
         <div className="space-y-6">
+          {/* Blueprint History Card (Phase 6.3) */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-cyan-500/30 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-cyan-400 uppercase tracking-wider">
+                Blueprint History ({blueprints.length})
+              </span>
+              <Box className="w-4 h-4 text-cyan-400" />
+            </div>
+
+            {blueprints.length > 0 ? (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                {blueprints.map((b) => {
+                  const isSelected = selectedBlueprint?.id === b.id;
+                  return (
+                    <button
+                      key={b.id}
+                      onClick={() => handleSelectBlueprint(b.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all text-xs ${
+                        isSelected
+                          ? "bg-[#1B191E] border-cyan-500"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-cyan-500/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#F5F1EA]">Blueprint v{b.blueprint_version}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${getStatusBadge(
+                            b.status
+                          )}`}
+                        >
+                          {b.status}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-2 text-[10px] text-[#77717C]">
+                        <span>{new Date(b.created_at).toLocaleDateString()}</span>
+                        <span className="font-mono">Spec v{b.source_generation_version}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No design blueprints generated yet.
+              </div>
+            )}
+          </div>
+
           {/* Generation History Card */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-[#242126] space-y-4">
             <div className="flex items-center justify-between border-b border-[#242126] pb-3">
@@ -808,6 +1301,7 @@ export default function WebsiteBuildWorkspacePage({
               </span>
               <Cpu className="w-4 h-4 text-[#E8B968]" />
             </div>
+
 
             {generations.length > 0 ? (
               <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
