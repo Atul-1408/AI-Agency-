@@ -71,6 +71,24 @@ from services.design_blueprint_service import (
     DesignBlueprintService,
     DesignBlueprintValidationError,
 )
+from schemas.code_generation import (
+    WebsiteCodeGenerationCancelRequest,
+    WebsiteCodeGenerationCreateRequest,
+    WebsiteCodeGenerationDetailResponse,
+    WebsiteCodeGenerationFilesResponse,
+    WebsiteCodeGenerationListResponse,
+    WebsiteCodeGenerationManifestResponse,
+    WebsiteCodeGenerationResponse,
+)
+from services.code_generation_service import (
+    CodeGenerationEligibilityError,
+    CodeGenerationFailedError,
+    CodeGenerationNotFoundError,
+    CodeGenerationOwnershipError,
+    CodeGenerationPRDMismatchError,
+    CodeGenerationValidationFailureError,
+    WebsiteCodeGenerationService,
+)
 
 router = APIRouter()
 
@@ -796,3 +814,318 @@ async def cancel_design_blueprint(
     except DesignBlueprintEligibilityError as e:
         await db.rollback()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+# ── Phase 6.4 Code Generation Endpoints ────────────────────────────────────────
+
+@router.post(
+    "/build-sessions/{session_id}/code-generations",
+    response_model=WebsiteCodeGenerationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Generate Next.js source code for an eligible build session",
+)
+async def create_code_generation(
+    session_id: uuid.UUID,
+    request: Optional[WebsiteCodeGenerationCreateRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationResponse:
+    """
+    Executes actual Next.js website code generation from a completed DesignBlueprint.
+    Strictly enforces owner authentication, READY_FOR_BUILD status, completed Blueprint,
+    deterministic static validation, and isolated workspace storage.
+    """
+    verify_owner_access(owner_email)
+    try:
+        blueprint_id = request.design_blueprint_id if request else None
+        code_gen = await WebsiteCodeGenerationService.generate_code(
+            db=db,
+            session_id=session_id,
+            owner_id=owner_email,
+            blueprint_id=blueprint_id,
+        )
+        return WebsiteCodeGenerationResponse(
+            id=code_gen.id,
+            project_id=code_gen.project_id,
+            build_session_id=code_gen.build_session_id,
+            website_generation_id=code_gen.website_generation_id,
+            design_blueprint_id=code_gen.design_blueprint_id,
+            approved_prd_id=code_gen.approved_prd_id,
+            owner_id=code_gen.owner_id,
+            prd_version=code_gen.prd_version,
+            code_generation_version=code_gen.code_generation_version,
+            status=code_gen.status.value,
+            provider=code_gen.provider,
+            model=code_gen.model,
+            source_checksum=code_gen.source_checksum,
+            file_count=code_gen.file_count,
+            source_artifact_id=code_gen.source_artifact_id,
+            error_code=code_gen.error_code,
+            error_message=code_gen.error_message,
+            started_at=code_gen.started_at,
+            completed_at=code_gen.completed_at,
+            failed_at=code_gen.failed_at,
+            metadata=code_gen.generation_metadata,
+            created_at=code_gen.created_at,
+            updated_at=code_gen.updated_at,
+        )
+    except CodeGenerationNotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except CodeGenerationPRDMismatchError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except CodeGenerationValidationFailureError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except CodeGenerationEligibilityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except CodeGenerationFailedError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
+
+
+@router.get(
+    "/build-sessions/{session_id}/code-generations",
+    response_model=WebsiteCodeGenerationListResponse,
+    summary="List code generations for a build session",
+)
+async def list_code_generations_for_session(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationListResponse:
+    """Lists all code generations for a build session ordered by version descending."""
+    verify_owner_access(owner_email)
+    try:
+        items = await WebsiteCodeGenerationService.list_code_generations(
+            db=db,
+            session_id=session_id,
+            owner_id=owner_email,
+        )
+        responses = [
+            WebsiteCodeGenerationResponse(
+                id=g.id,
+                project_id=g.project_id,
+                build_session_id=g.build_session_id,
+                website_generation_id=g.website_generation_id,
+                design_blueprint_id=g.design_blueprint_id,
+                approved_prd_id=g.approved_prd_id,
+                owner_id=g.owner_id,
+                prd_version=g.prd_version,
+                code_generation_version=g.code_generation_version,
+                status=g.status.value,
+                provider=g.provider,
+                model=g.model,
+                source_checksum=g.source_checksum,
+                file_count=g.file_count,
+                source_artifact_id=g.source_artifact_id,
+                error_code=g.error_code,
+                error_message=g.error_message,
+                started_at=g.started_at,
+                completed_at=g.completed_at,
+                failed_at=g.failed_at,
+                metadata=g.generation_metadata,
+                created_at=g.created_at,
+                updated_at=g.updated_at,
+            )
+            for g in items
+        ]
+        completed = sum(1 for g in items if g.status.value == "completed")
+        failed = sum(1 for g in items if g.status.value == "failed")
+        active = sum(1 for g in items if g.status.value in ("pending", "generating", "validating"))
+
+        return WebsiteCodeGenerationListResponse(
+            items=responses,
+            total=len(responses),
+            completed_count=completed,
+            failed_count=failed,
+            active_count=active,
+        )
+    except CodeGenerationNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/code-generations/{generation_id}",
+    response_model=WebsiteCodeGenerationDetailResponse,
+    summary="Retrieve code generation details and manifest",
+)
+async def get_code_generation(
+    generation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationDetailResponse:
+    """Retrieve full details of a specific code generation execution."""
+    verify_owner_access(owner_email)
+    try:
+        record, manifest = await WebsiteCodeGenerationService.get_code_generation(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+        )
+        files_summary = manifest.get("files") if manifest else None
+        return WebsiteCodeGenerationDetailResponse(
+            id=record.id,
+            project_id=record.project_id,
+            build_session_id=record.build_session_id,
+            website_generation_id=record.website_generation_id,
+            design_blueprint_id=record.design_blueprint_id,
+            approved_prd_id=record.approved_prd_id,
+            owner_id=record.owner_id,
+            prd_version=record.prd_version,
+            code_generation_version=record.code_generation_version,
+            status=record.status.value,
+            provider=record.provider,
+            model=record.model,
+            source_checksum=record.source_checksum,
+            file_count=record.file_count,
+            source_artifact_id=record.source_artifact_id,
+            error_code=record.error_code,
+            error_message=record.error_message,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            failed_at=record.failed_at,
+            metadata=record.generation_metadata,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+            project_name=record.project.project_name if record.project else None,
+            project_slug=record.project.project_slug if record.project else None,
+            manifest=manifest,
+            files_summary=files_summary,
+        )
+    except CodeGenerationNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post(
+    "/code-generations/{generation_id}/cancel",
+    response_model=WebsiteCodeGenerationResponse,
+    summary="Cancel an active code generation",
+)
+async def cancel_code_generation(
+    generation_id: uuid.UUID,
+    request: Optional[WebsiteCodeGenerationCancelRequest] = None,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationResponse:
+    """Cancels a pending, generating, or validating code generation execution."""
+    verify_owner_access(owner_email)
+    try:
+        record = await WebsiteCodeGenerationService.cancel_code_generation(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+            reason=request.reason if request else None,
+        )
+        return WebsiteCodeGenerationResponse(
+            id=record.id,
+            project_id=record.project_id,
+            build_session_id=record.build_session_id,
+            website_generation_id=record.website_generation_id,
+            design_blueprint_id=record.design_blueprint_id,
+            approved_prd_id=record.approved_prd_id,
+            owner_id=record.owner_id,
+            prd_version=record.prd_version,
+            code_generation_version=record.code_generation_version,
+            status=record.status.value,
+            provider=record.provider,
+            model=record.model,
+            source_checksum=record.source_checksum,
+            file_count=record.file_count,
+            source_artifact_id=record.source_artifact_id,
+            error_code=record.error_code,
+            error_message=record.error_message,
+            started_at=record.started_at,
+            completed_at=record.completed_at,
+            failed_at=record.failed_at,
+            metadata=record.generation_metadata,
+            created_at=record.created_at,
+            updated_at=record.updated_at,
+        )
+    except CodeGenerationNotFoundError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except CodeGenerationEligibilityError as e:
+        await db.rollback()
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+
+
+@router.get(
+    "/code-generations/{generation_id}/manifest",
+    response_model=WebsiteCodeGenerationManifestResponse,
+    summary="Retrieve structured file manifest for a completed code generation",
+)
+async def get_code_generation_manifest(
+    generation_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationManifestResponse:
+    """Retrieves file manifest, checksums, entrypoints, and routes."""
+    verify_owner_access(owner_email)
+    try:
+        record, manifest = await WebsiteCodeGenerationService.get_code_generation(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+        )
+        if not manifest:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Manifest not found for this generation.")
+
+        return WebsiteCodeGenerationManifestResponse(
+            generation_id=record.id,
+            version=record.code_generation_version,
+            framework=manifest.get("framework", "nextjs"),
+            language=manifest.get("language", "typescript"),
+            source_checksum=manifest.get("source_checksum", record.source_checksum or ""),
+            file_count=manifest.get("file_count", record.file_count),
+            entrypoints=manifest.get("entrypoints", []),
+            routes=manifest.get("routes", []),
+            components=manifest.get("components", []),
+            files=manifest.get("files", []),
+        )
+    except CodeGenerationNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/code-generations/{generation_id}/files",
+    response_model=WebsiteCodeGenerationFilesResponse,
+    summary="Retrieve generated source files for a code generation",
+)
+async def get_code_generation_files(
+    generation_id: uuid.UUID,
+    path: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteCodeGenerationFilesResponse:
+    """Retrieves all generated files or a specific file matching query path."""
+    verify_owner_access(owner_email)
+    try:
+        files = await WebsiteCodeGenerationService.get_code_generation_files(
+            db=db,
+            generation_id=generation_id,
+            owner_id=owner_email,
+            path=path,
+        )
+        return WebsiteCodeGenerationFilesResponse(
+            generation_id=generation_id,
+            files=files,
+        )
+    except CodeGenerationNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except CodeGenerationOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))

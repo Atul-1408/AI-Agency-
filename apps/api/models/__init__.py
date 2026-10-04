@@ -335,6 +335,8 @@ from models.website_builder import (
     WebsiteGenerationStatus,
     DesignBlueprint,
     DesignBlueprintStatus,
+    WebsiteCodeGeneration,
+    WebsiteCodeGenerationStatus,
 )
 
 __all__ = [
@@ -404,4 +406,7 @@ __all__ = [
     # Phase 6.3
     "DesignBlueprint",
     "DesignBlueprintStatus",
+    # Phase 6.4
+    "WebsiteCodeGeneration",
+    "WebsiteCodeGenerationStatus",
 ]

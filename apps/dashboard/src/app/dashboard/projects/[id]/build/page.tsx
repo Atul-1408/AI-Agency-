@@ -13,6 +13,9 @@ import {
   type DesignBlueprint,
   type DesignBlueprintDetail,
   type WebsiteDesignBlueprint,
+  type WebsiteCodeGeneration,
+  type WebsiteCodeGenerationDetail,
+  type GeneratedWebsiteFile,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -45,6 +48,11 @@ import {
   Type,
   Maximize2,
   CheckSquare,
+  Folder,
+  FileCode,
+  Terminal,
+  Check,
+  Copy,
 } from "lucide-react";
 
 
@@ -69,6 +77,14 @@ export default function WebsiteBuildWorkspacePage({
   const [blueprintLoading, setBlueprintLoading] = useState(false);
   const [activeBlueprintTab, setActiveBlueprintTab] = useState<"tokens" | "components" | "pages" | "assets" | "a11y" | "raw">("tokens");
 
+  // Phase 6.4 Website Code Generation State
+  const [codeGenerations, setCodeGenerations] = useState<WebsiteCodeGeneration[]>([]);
+  const [selectedCodeGen, setSelectedCodeGen] = useState<WebsiteCodeGenerationDetail | null>(null);
+  const [codeGenLoading, setCodeGenLoading] = useState(false);
+  const [codeFiles, setCodeFiles] = useState<GeneratedWebsiteFile[]>([]);
+  const [selectedFile, setSelectedFile] = useState<GeneratedWebsiteFile | null>(null);
+  const [activeCodeGenTab, setActiveCodeGenTab] = useState<"manifest" | "code" | "routes" | "raw">("manifest");
+
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [genLoading, setGenLoading] = useState(false);
@@ -88,6 +104,36 @@ export default function WebsiteBuildWorkspacePage({
     } catch {
       setBlueprints([]);
       setSelectedBlueprint(null);
+    }
+  }, []);
+
+  const loadCodeGensForSession = useCallback(async (sessionId: string) => {
+    try {
+      const cgList = await api.websiteBuilder.listCodeGenerations(sessionId);
+      setCodeGenerations(cgList.items);
+      if (cgList.items.length > 0) {
+        const [cgDetail, filesData] = await Promise.all([
+          api.websiteBuilder.getCodeGeneration(cgList.items[0].id),
+          api.websiteBuilder.getCodeGenerationFiles(cgList.items[0].id),
+        ]);
+        setSelectedCodeGen(cgDetail);
+        setCodeFiles(filesData.files);
+        if (filesData.files.length > 0) {
+          const rootPage = filesData.files.find((f) => f.path === "app/page.tsx") || filesData.files[0];
+          setSelectedFile(rootPage);
+        } else {
+          setSelectedFile(null);
+        }
+      } else {
+        setSelectedCodeGen(null);
+        setCodeFiles([]);
+        setSelectedFile(null);
+      }
+    } catch {
+      setCodeGenerations([]);
+      setSelectedCodeGen(null);
+      setCodeFiles([]);
+      setSelectedFile(null);
     }
   }, []);
 
@@ -116,6 +162,9 @@ export default function WebsiteBuildWorkspacePage({
         setActiveSession(detail);
         setGenerations(gensList.items);
 
+        // Load Code Generations for this session
+        await loadCodeGensForSession(targetSessionId);
+
         // Auto-select latest generation if available
         if (gensList.items.length > 0) {
           const genDetail = await api.websiteBuilder.getGeneration(gensList.items[0].id);
@@ -132,13 +181,17 @@ export default function WebsiteBuildWorkspacePage({
         setSelectedGeneration(null);
         setBlueprints([]);
         setSelectedBlueprint(null);
+        setCodeGenerations([]);
+        setSelectedCodeGen(null);
+        setCodeFiles([]);
+        setSelectedFile(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load build workspace data.");
     } finally {
       setLoading(false);
     }
-  }, [projectId, loadBlueprintsForGen]);
+  }, [projectId, loadBlueprintsForGen, loadCodeGensForSession]);
 
 
   useEffect(() => {
@@ -273,6 +326,67 @@ export default function WebsiteBuildWorkspacePage({
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const handleTriggerCodeGeneration = async () => {
+    if (!activeSession) return;
+    try {
+      setCodeGenLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const newCodeGen = await api.websiteBuilder.createCodeGeneration(
+        activeSession.id,
+        selectedBlueprint?.id
+      );
+      setSuccessMessage(`Next.js Code Generation v${newCodeGen.code_generation_version} completed successfully.`);
+      await loadCodeGensForSession(activeSession.id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate website code.");
+    } finally {
+      setCodeGenLoading(false);
+    }
+  };
+
+  const handleCancelCodeGeneration = async (codeGenId: string) => {
+    try {
+      setActionLoading(true);
+      await api.websiteBuilder.cancelCodeGeneration(codeGenId, "Cancelled by user");
+      setSuccessMessage("Code generation cancelled.");
+      if (activeSession) {
+        await loadCodeGensForSession(activeSession.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to cancel code generation.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSelectCodeGen = async (codeGenId: string) => {
+    try {
+      setActionLoading(true);
+      const [cgDetail, filesData] = await Promise.all([
+        api.websiteBuilder.getCodeGeneration(codeGenId),
+        api.websiteBuilder.getCodeGenerationFiles(codeGenId),
+      ]);
+      setSelectedCodeGen(cgDetail);
+      setCodeFiles(filesData.files);
+      if (filesData.files.length > 0) {
+        const rootPage = filesData.files.find((f) => f.path === "app/page.tsx") || filesData.files[0];
+        setSelectedFile(rootPage);
+      } else {
+        setSelectedFile(null);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load code generation details.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleSelectFile = (file: GeneratedWebsiteFile) => {
+    setSelectedFile(file);
+    setActiveCodeGenTab("code");
   };
 
 
@@ -1241,10 +1355,288 @@ export default function WebsiteBuildWorkspacePage({
               )}
             </div>
           )}
+
+          {/* Phase 6.4: Website Code Generation & Manifest Inspector */}
+          <div className="p-8 rounded-2xl bg-[#131215] border border-emerald-500/30 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#242126] pb-6">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-5 h-5 text-emerald-400" />
+                  <h3 className="text-lg font-bold text-[#F5F1EA]">Next.js Website Code Generation</h3>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                    Phase 6.4 Engine
+                  </span>
+                </div>
+                <p className="text-xs text-[#77717C]">
+                  Generates deterministic Next.js App Router + TypeScript + Tailwind source code from the Design Blueprint.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-3">
+                {selectedCodeGen && ["pending", "generating", "validating"].includes(selectedCodeGen.status) && (
+                  <button
+                    onClick={() => handleCancelCodeGeneration(selectedCodeGen.id)}
+                    disabled={actionLoading}
+                    className="px-4 py-2 rounded-xl bg-red-500/10 text-red-400 border border-red-500/30 text-xs font-semibold hover:bg-red-500/20 transition-all"
+                  >
+                    Cancel Generation
+                  </button>
+                )}
+                <button
+                  onClick={handleTriggerCodeGeneration}
+                  disabled={
+                    codeGenLoading ||
+                    !selectedBlueprint ||
+                    selectedBlueprint.status !== "completed" ||
+                    !activeSession ||
+                    !["ready", "in_progress"].includes(activeSession.status)
+                  }
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 text-slate-950 font-bold text-xs hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-lg shadow-emerald-500/10 flex items-center gap-2"
+                >
+                  {codeGenLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-slate-950 border-t-transparent rounded-full animate-spin" />
+                      Generating Code...
+                    </>
+                  ) : (
+                    <>
+                      <FileCode className="w-4 h-4" />
+                      Generate Website Code
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {selectedCodeGen ? (
+              <div className="space-y-6">
+                {/* Generation Meta Header */}
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-xs">
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Version</span>
+                    <span className="font-mono text-emerald-400 font-bold">Code v{selectedCodeGen.code_generation_version}</span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Status</span>
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border mt-0.5 ${getStatusBadge(selectedCodeGen.status)}`}>
+                      {selectedCodeGen.status}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Files</span>
+                    <span className="font-bold text-[#F5F1EA]">{selectedCodeGen.file_count} files</span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Checksum</span>
+                    <span className="font-mono text-[#A9A4AE] text-[11px] truncate block max-w-[120px]" title={selectedCodeGen.source_checksum || "N/A"}>
+                      {selectedCodeGen.source_checksum ? `${selectedCodeGen.source_checksum.slice(0, 12)}...` : "N/A"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Provider / Model</span>
+                    <span className="text-[#A9A4AE] truncate block">{selectedCodeGen.provider}</span>
+                  </div>
+                </div>
+
+                {/* Sub-tabs */}
+                <div className="flex border-b border-[#242126] gap-2">
+                  {[
+                    { id: "manifest", label: `File Manifest (${codeFiles.length})`, icon: Folder },
+                    { id: "code", label: `Source Inspector (${selectedFile?.path || "File"})`, icon: FileCode },
+                    { id: "routes", label: "Routes & Structure", icon: Layout },
+                    { id: "raw", label: "Raw Manifest JSON", icon: Code },
+                  ].map((tab) => {
+                    const Icon = tab.icon;
+                    const isActive = activeCodeGenTab === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        onClick={() => setActiveCodeGenTab(tab.id as any)}
+                        className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-all ${
+                          isActive
+                            ? "border-emerald-400 text-emerald-300"
+                            : "border-transparent text-[#77717C] hover:text-[#A9A4AE]"
+                        }`}
+                      >
+                        <Icon className="w-3.5 h-3.5" />
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Tab 1: File Manifest */}
+                {activeCodeGenTab === "manifest" && (
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center text-xs text-[#77717C]">
+                      <span>Project Workspace: Next.js 15 • TypeScript • App Router</span>
+                      <span>Total files: {codeFiles.length}</span>
+                    </div>
+                    <div className="border border-[#242126] rounded-xl overflow-hidden divide-y divide-[#242126]">
+                      {codeFiles.map((file) => (
+                        <div
+                          key={file.path}
+                          className="p-3 bg-[#1B191E]/60 hover:bg-[#1B191E] flex items-center justify-between transition-colors text-xs"
+                        >
+                          <div className="flex items-center gap-3">
+                            <FileCode className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+                            <div>
+                              <span className="font-mono text-[#F5F1EA] font-semibold">{file.path}</span>
+                              <div className="flex items-center gap-3 text-[10px] text-[#77717C] mt-0.5">
+                                <span>{(file.size_bytes / 1024).toFixed(1)} KB</span>
+                                <span>SHA: {file.checksum.slice(0, 10)}...</span>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="px-2 py-0.5 rounded text-[10px] uppercase font-mono bg-[#242126] text-[#A9A4AE]">
+                              {file.file_type}
+                            </span>
+                            <button
+                              onClick={() => handleSelectFile(file)}
+                              className="px-3 py-1 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-[11px] font-semibold hover:bg-emerald-500/20 transition-all"
+                            >
+                              View Code
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Code Viewer */}
+                {activeCodeGenTab === "code" && (
+                  <div className="space-y-3">
+                    {selectedFile ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between p-3 rounded-xl bg-[#1B191E] border border-[#242126] text-xs">
+                          <div className="flex items-center gap-2 font-mono">
+                            <FileCode className="w-4 h-4 text-emerald-400" />
+                            <span className="text-[#F5F1EA] font-bold">{selectedFile.path}</span>
+                            <span className="text-[#77717C]">({(selectedFile.size_bytes / 1024).toFixed(1)} KB)</span>
+                          </div>
+                          <div className="flex items-center gap-2 text-xs text-[#77717C]">
+                            <span className="font-mono text-[10px]">Checksum: {selectedFile.checksum.slice(0, 16)}...</span>
+                          </div>
+                        </div>
+                        <pre className="p-5 rounded-xl bg-[#0C0B0D] border border-[#242126] text-xs font-mono text-[#E2E8F0] overflow-x-auto max-h-[500px] leading-relaxed">
+                          <code>{selectedFile.content}</code>
+                        </pre>
+                      </div>
+                    ) : (
+                      <div className="p-8 text-center text-xs text-[#77717C] bg-[#1B191E] rounded-xl border border-[#242126]">
+                        Select a file from the Manifest tab to view its source code.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Tab 3: Routes & Architecture */}
+                {activeCodeGenTab === "routes" && (
+                  <div className="space-y-4 text-xs">
+                    <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                      <h4 className="font-bold text-[#F5F1EA] uppercase tracking-wider text-[11px]">Primary Entrypoints</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(selectedCodeGen.manifest?.entrypoints || ["app/layout.tsx", "app/page.tsx"]).map((ep) => (
+                          <span key={ep} className="px-2.5 py-1 rounded bg-[#242126] font-mono text-emerald-300">
+                            {ep}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                      <h4 className="font-bold text-[#F5F1EA] uppercase tracking-wider text-[11px]">Generated Routes</h4>
+                      <div className="flex flex-wrap gap-2">
+                        {(selectedCodeGen.manifest?.routes || ["/", "/about", "/services", "/contact"]).map((r) => (
+                          <span key={r} className="px-2.5 py-1 rounded bg-[#242126] font-mono text-cyan-300">
+                            {r}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                      <h4 className="font-bold text-[#F5F1EA] uppercase tracking-wider text-[11px]">Registered Components</h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        {(selectedCodeGen.manifest?.components || ["Header", "Footer", "Hero", "FeatureGrid", "Button", "Card"]).map((c) => (
+                          <div key={c} className="p-2.5 rounded bg-[#131215] border border-[#242126] text-center font-semibold text-[#F5F1EA]">
+                            {c}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 4: Raw Manifest */}
+                {activeCodeGenTab === "raw" && (
+                  <pre className="p-4 rounded-xl bg-[#0C0B0D] border border-[#242126] text-[11px] font-mono text-[#A9A4AE] overflow-x-auto max-h-[450px]">
+                    {JSON.stringify(selectedCodeGen.manifest || selectedCodeGen.metadata, null, 2)}
+                  </pre>
+                )}
+              </div>
+            ) : (
+              <div className="p-8 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C] space-y-2">
+                <FileCode className="w-8 h-8 text-emerald-400/40 mx-auto" />
+                <p className="font-semibold text-[#F5F1EA]">No Website Code Generated Yet</p>
+                <p>Ensure the Design Blueprint is completed, then click &quot;Generate Website Code&quot; to synthesize the Next.js codebase.</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Right Column: Generation History, Blueprint History & Session Baseline */}
         <div className="space-y-6">
+          {/* Code Generation History Card (Phase 6.4) */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-emerald-500/30 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-emerald-400 uppercase tracking-wider">
+                Code History ({codeGenerations.length})
+              </span>
+              <Terminal className="w-4 h-4 text-emerald-400" />
+            </div>
+
+            {codeGenerations.length > 0 ? (
+              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                {codeGenerations.map((cg) => {
+                  const isSelected = selectedCodeGen?.id === cg.id;
+                  return (
+                    <button
+                      key={cg.id}
+                      onClick={() => handleSelectCodeGen(cg.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all text-xs ${
+                        isSelected
+                          ? "bg-[#1B191E] border-emerald-500"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-emerald-500/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#F5F1EA]">Code v{cg.code_generation_version}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${getStatusBadge(
+                            cg.status
+                          )}`}
+                        >
+                          {cg.status}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-2 text-[10px] text-[#77717C]">
+                        <span>{new Date(cg.created_at).toLocaleDateString()}</span>
+                        <span className="font-mono">{cg.file_count} files</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No code generations yet.
+              </div>
+            )}
+          </div>
+
           {/* Blueprint History Card (Phase 6.3) */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-cyan-500/30 space-y-4">
             <div className="flex items-center justify-between border-b border-[#242126] pb-3">

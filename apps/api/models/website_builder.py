@@ -99,6 +99,7 @@ class WebsiteBuildArtifactType(str, enum.Enum):
     SITE_STRUCTURE        = "site_structure"
     COMPONENT_PLAN        = "component_plan"
     SOURCE_CODE           = "source_code"
+    WEBSITE_SOURCE_CODE   = "website_source_code"
     ASSET                 = "asset"
     BUILD_LOG             = "build_log"
     QA_REPORT             = "qa_report"
@@ -119,6 +120,18 @@ class WebsiteGenerationStatus(str, enum.Enum):
 class DesignBlueprintStatus(str, enum.Enum):
     """
     Lifecycle status of a Phase 6.3 Design System and Site Architecture Blueprint generation.
+    """
+    PENDING     = "pending"
+    GENERATING  = "generating"
+    VALIDATING  = "validating"
+    COMPLETED   = "completed"
+    FAILED      = "failed"
+    CANCELLED   = "cancelled"
+
+
+class WebsiteCodeGenerationStatus(str, enum.Enum):
+    """
+    Lifecycle status of a Phase 6.4 Website Source Code Generation execution.
     """
     PENDING     = "pending"
     GENERATING  = "generating"
@@ -167,6 +180,11 @@ class WebsiteBuildSession(UUIDPKMixin, TimestampMixin, Base):
         lazy="select",
     )
     generations: Mapped[List["WebsiteGeneration"]] = relationship(
+        back_populates="build_session",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    code_generations: Mapped[List["WebsiteCodeGeneration"]] = relationship(
         back_populates="build_session",
         cascade="all, delete-orphan",
         lazy="select",
@@ -328,3 +346,82 @@ class DesignBlueprint(UUIDPKMixin, TimestampMixin, Base):
     project: Mapped["Project"] = relationship(lazy="select")
     source_generation: Mapped["WebsiteGeneration"] = relationship(back_populates="blueprints", lazy="select")
     specification_artifact: Mapped[Optional["WebsiteBuildArtifact"]] = relationship(lazy="select")
+    code_generations: Mapped[List["WebsiteCodeGeneration"]] = relationship(
+        back_populates="design_blueprint",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+
+
+class WebsiteCodeGeneration(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Phase 6 Stage 6.4 — Actual Website Code Generation.
+    Executes production-oriented Next.js + React + TypeScript code generation
+    from an approved DesignBlueprint, storing structured, validated source code artifacts.
+    """
+    __tablename__ = "website_code_generations"
+    __table_args__ = (
+        Index("ix_code_generations_session_id", "build_session_id"),
+        Index("ix_code_generations_project_id", "project_id"),
+        Index("ix_code_generations_blueprint_id", "design_blueprint_id"),
+        Index("ix_code_generations_generation_id", "website_generation_id"),
+        Index("ix_code_generations_owner_id", "owner_id"),
+        Index("ix_code_generations_status", "status"),
+    )
+
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    build_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    website_generation_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_generations.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    design_blueprint_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("design_blueprints.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    approved_prd_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_prds.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_artifact_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_artifacts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    prd_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    code_generation_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[WebsiteCodeGenerationStatus] = mapped_column(
+        Enum(WebsiteCodeGenerationStatus, name="website_code_generation_status", native_enum=False),
+        default=WebsiteCodeGenerationStatus.PENDING,
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(String(100), default="mock_code_provider", nullable=False)
+    model: Mapped[str] = mapped_column(String(100), default="mock-nextjs-code-v1", nullable=False)
+    source_checksum: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    file_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    failed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    generation_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, default=dict, nullable=False)
+
+    # Relationships
+    build_session: Mapped["WebsiteBuildSession"] = relationship(back_populates="code_generations", lazy="select")
+    project: Mapped["Project"] = relationship(lazy="select")
+    website_generation: Mapped["WebsiteGeneration"] = relationship(lazy="select")
+    design_blueprint: Mapped["DesignBlueprint"] = relationship(back_populates="code_generations", lazy="select")
+    source_artifact: Mapped[Optional["WebsiteBuildArtifact"]] = relationship(lazy="select")

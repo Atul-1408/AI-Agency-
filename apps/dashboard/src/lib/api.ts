@@ -541,6 +541,40 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
+    createCodeGeneration: (sessionId: string, blueprintId?: string) =>
+      apiFetch<WebsiteCodeGeneration>(
+        `/api/v1/build-sessions/${sessionId}/code-generations`,
+        {
+          method: "POST",
+          body: JSON.stringify({ design_blueprint_id: blueprintId }),
+        }
+      ),
+    listCodeGenerations: (sessionId: string) =>
+      apiFetch<WebsiteCodeGenerationListResponse>(
+        `/api/v1/build-sessions/${sessionId}/code-generations`
+      ),
+    getCodeGeneration: (generationId: string) =>
+      apiFetch<WebsiteCodeGenerationDetail>(
+        `/api/v1/code-generations/${generationId}`
+      ),
+    cancelCodeGeneration: (generationId: string, reason?: string) =>
+      apiFetch<WebsiteCodeGeneration>(
+        `/api/v1/code-generations/${generationId}/cancel`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason }),
+        }
+      ),
+    getCodeGenerationManifest: (generationId: string) =>
+      apiFetch<WebsiteCodeGenerationManifestResponse>(
+        `/api/v1/code-generations/${generationId}/manifest`
+      ),
+    getCodeGenerationFiles: (generationId: string, path?: string) => {
+      const q = path ? `?path=${encodeURIComponent(path)}` : "";
+      return apiFetch<WebsiteCodeGenerationFilesResponse>(
+        `/api/v1/code-generations/${generationId}/files${q}`
+      );
+    },
   },
 };
 
@@ -1085,4 +1119,105 @@ export interface DesignBlueprintListResponse {
   completed_count: number;
   failed_count: number;
   active_count: number;
+}
+
+// ── Phase 6.4 Website Code Generation Types ────────────────────────────────────
+
+export type WebsiteCodeGenerationStatus =
+  | "pending"
+  | "generating"
+  | "validating"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface GeneratedWebsiteFile {
+  path: string;
+  content: string;
+  file_type: string;
+  checksum: string;
+  size_bytes: number;
+}
+
+export interface WebsiteCodeGeneration {
+  id: string;
+  project_id: string;
+  build_session_id: string;
+  website_generation_id: string;
+  design_blueprint_id: string;
+  approved_prd_id: string;
+  owner_id: string;
+  prd_version: number;
+  code_generation_version: number;
+  status: WebsiteCodeGenerationStatus;
+  provider: string;
+  model: string;
+  source_checksum?: string | null;
+  file_count: number;
+  source_artifact_id?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  failed_at?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteCodeGenerationDetail extends WebsiteCodeGeneration {
+  project_name?: string | null;
+  project_slug?: string | null;
+  manifest?: {
+    framework: string;
+    language: string;
+    source_checksum: string;
+    file_count: number;
+    entrypoints: string[];
+    routes: string[];
+    components: string[];
+    files: Array<{
+      path: string;
+      size_bytes: number;
+      checksum: string;
+      file_type: string;
+    }>;
+  } | null;
+  files_summary?: Array<{
+    path: string;
+    size_bytes: number;
+    checksum: string;
+    file_type: string;
+  }> | null;
+}
+
+export interface WebsiteCodeGenerationListResponse {
+  items: WebsiteCodeGeneration[];
+  total: number;
+  completed_count: number;
+  failed_count: number;
+  active_count: number;
+}
+
+export interface WebsiteCodeGenerationManifestResponse {
+  generation_id: string;
+  version: number;
+  framework: string;
+  language: string;
+  source_checksum: string;
+  file_count: number;
+  entrypoints: string[];
+  routes: string[];
+  components: string[];
+  files: Array<{
+    path: string;
+    size_bytes: number;
+    checksum: string;
+    file_type: string;
+  }>;
+}
+
+export interface WebsiteCodeGenerationFilesResponse {
+  generation_id: string;
+  files: GeneratedWebsiteFile[];
 }
