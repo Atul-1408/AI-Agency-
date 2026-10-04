@@ -331,6 +331,8 @@ from models.website_builder import (
     WebsiteBuildArtifactType,
     WebsiteBuildSession,
     WebsiteBuildSessionStatus,
+    WebsiteGeneration,
+    WebsiteGenerationStatus,
 )
 
 __all__ = [
@@ -394,4 +396,7 @@ __all__ = [
     "TERMINAL_BUILD_STATUSES",
     "WebsiteBuildArtifact",
     "WebsiteBuildArtifactType",
+    # Phase 6.2
+    "WebsiteGeneration",
+    "WebsiteGenerationStatus",
 ]

@@ -511,8 +511,24 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
+    createGeneration: (sessionId: string) =>
+      apiFetch<WebsiteGeneration>(`/api/v1/build-sessions/${sessionId}/generations`, {
+        method: "POST",
+      }),
+    listGenerations: (sessionId: string) =>
+      apiFetch<WebsiteGenerationListResponse>(
+        `/api/v1/build-sessions/${sessionId}/generations`
+      ),
+    getGeneration: (generationId: string) =>
+      apiFetch<WebsiteGenerationDetail>(`/api/v1/generations/${generationId}`),
+    cancelGeneration: (generationId: string, reason?: string) =>
+      apiFetch<WebsiteGeneration>(`/api/v1/generations/${generationId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
   },
 };
+
 
 // ── PRD Types ─────────────────────────────────────────────────────────────────
 
@@ -674,6 +690,7 @@ export type WebsiteBuildSessionStatus =
 
 export type WebsiteBuildArtifactType =
   | "prd_snapshot"
+  | "website_specification"
   | "design_plan"
   | "content_plan"
   | "site_structure"
@@ -726,4 +743,142 @@ export interface WebsiteBuildSessionListResponse {
   active_count: number;
   completed_count: number;
   failed_count: number;
+}
+
+// ── Phase 6.2 Website Generation & Specification Types ────────────────────────
+
+export type WebsiteGenerationStatus =
+  | "pending"
+  | "generating"
+  | "validating"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export interface NavigationItemSpecification {
+  label: string;
+  path: string;
+  order: number;
+  visibility: "all" | "header" | "footer" | "mobile";
+}
+
+export interface SectionSpecification {
+  section_id: string;
+  type: string;
+  purpose: string;
+  heading: string;
+  supporting_content: string;
+  layout: string;
+  components: string[];
+  cta?: string | null;
+  visibility: "visible" | "conditional" | "hidden";
+  responsive_behavior: string;
+}
+
+export interface PageSpecification {
+  page_id: string;
+  path: string;
+  name: string;
+  purpose: string;
+  priority: "primary" | "secondary" | "utility";
+  seo_title: string;
+  seo_description: string;
+  sections: SectionSpecification[];
+  primary_cta?: string | null;
+  secondary_cta?: string | null;
+}
+
+export interface TypographySpecification {
+  heading_family: string;
+  body_family: string;
+  heading_scale: Record<string, string>;
+  body_scale: Record<string, string>;
+}
+
+export interface ColorPaletteSpecification {
+  primary: string;
+  secondary: string;
+  accent: string;
+  background: string;
+  surface: string;
+  text: string;
+  muted: string;
+}
+
+export interface DesignSystemSpecification {
+  visual_direction: string;
+  typography: TypographySpecification;
+  color_palette: ColorPaletteSpecification;
+  spacing: Record<string, string>;
+  border_radius: Record<string, string>;
+  shadows: Record<string, string>;
+  imagery_direction: string;
+  icon_direction: string;
+  motion_direction: string;
+  responsive_strategy: string;
+}
+
+export interface ContentSpecification {
+  page: string;
+  section: string;
+  content_type: string;
+  required: boolean;
+  source: string;
+  notes: string;
+}
+
+export interface WebsiteSpecification {
+  specification_version: string;
+  generation_version: number;
+  project_name: string;
+  project_slug: string;
+  website_goal: string;
+  target_audience: string;
+  primary_cta: string;
+  secondary_ctas: string[];
+  navigation: NavigationItemSpecification[];
+  pages: PageSpecification[];
+  design_system: DesignSystemSpecification;
+  content_strategy: ContentSpecification[];
+  accessibility_requirements: string[];
+  responsive_requirements: string[];
+  technical_constraints: string[];
+  open_questions: string[];
+  source_prd_id: string;
+  source_prd_version: number;
+}
+
+export interface WebsiteGeneration {
+  id: string;
+  build_session_id: string;
+  project_id: string;
+  owner_id: string;
+  source_prd_id: string;
+  source_prd_version: number;
+  generation_version: number;
+  status: WebsiteGenerationStatus;
+  provider: string;
+  model: string;
+  specification_artifact_id?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteGenerationDetail extends WebsiteGeneration {
+  specification?: WebsiteSpecification | null;
+  project_name?: string | null;
+  project_slug?: string | null;
+}
+
+export interface WebsiteGenerationListResponse {
+  items: WebsiteGeneration[];
+  total: number;
+  completed_count: number;
+  failed_count: number;
+  active_count: number;
 }

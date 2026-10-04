@@ -42,8 +42,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 1440         # 24 hours
 
-    # ── AI / Nemotron ─────────────────────────────────────────
-    # Phase 1: interface is defined but AI calls are not made by default.
+    # ── AI / Website Generation (Phase 6.2) ───────────────────
+    AI_PROVIDER: str = "mock"              # "mock" | "nemotron"
+    AI_MODEL: str = "mock-spec-v1"
+    AI_API_KEY: str = ""
     # Set NEMOTRON_ENABLED=true only when you have a valid API key.
     NEMOTRON_ENABLED: bool = False
     NEMOTRON_API_KEY: str = ""

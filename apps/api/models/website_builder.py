@@ -91,15 +91,28 @@ class WebsiteBuildArtifactType(str, enum.Enum):
     Extensible artifact categories for the AI Website Builder.
     In Phase 6.1, SOURCE_CODE is NOT created automatically.
     """
-    PRD_SNAPSHOT    = "prd_snapshot"
-    DESIGN_PLAN     = "design_plan"
-    CONTENT_PLAN    = "content_plan"
-    SITE_STRUCTURE  = "site_structure"
-    COMPONENT_PLAN  = "component_plan"
-    SOURCE_CODE     = "source_code"
-    ASSET           = "asset"
-    BUILD_LOG       = "build_log"
-    QA_REPORT       = "qa_report"
+    PRD_SNAPSHOT          = "prd_snapshot"
+    WEBSITE_SPECIFICATION = "website_specification"
+    DESIGN_PLAN           = "design_plan"
+    CONTENT_PLAN          = "content_plan"
+    SITE_STRUCTURE        = "site_structure"
+    COMPONENT_PLAN        = "component_plan"
+    SOURCE_CODE           = "source_code"
+    ASSET                 = "asset"
+    BUILD_LOG             = "build_log"
+    QA_REPORT             = "qa_report"
+
+
+class WebsiteGenerationStatus(str, enum.Enum):
+    """
+    Lifecycle status of an AI website specification generation attempt.
+    """
+    PENDING     = "pending"
+    GENERATING  = "generating"
+    VALIDATING  = "validating"
+    COMPLETED   = "completed"
+    FAILED      = "failed"
+    CANCELLED   = "cancelled"
 
 
 # ── Models ────────────────────────────────────────────────────────────────────
@@ -136,6 +149,11 @@ class WebsiteBuildSession(UUIDPKMixin, TimestampMixin, Base):
     # Relationships
     project: Mapped["Project"] = relationship(lazy="select")
     artifacts: Mapped[List["WebsiteBuildArtifact"]] = relationship(
+        back_populates="build_session",
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
+    generations: Mapped[List["WebsiteGeneration"]] = relationship(
         back_populates="build_session",
         cascade="all, delete-orphan",
         lazy="select",
@@ -178,3 +196,61 @@ class WebsiteBuildArtifact(UUIDPKMixin, TimestampMixin, Base):
         lazy="select",
     )
     project: Mapped["Project"] = relationship(lazy="select")
+
+
+class WebsiteGeneration(UUIDPKMixin, TimestampMixin, Base):
+    """
+    Record of an AI Website Generation execution attempting to produce a
+    structured WebsiteSpecification.
+    """
+    __tablename__ = "website_generations"
+    __table_args__ = (
+        Index("ix_website_generations_session_id", "build_session_id"),
+        Index("ix_website_generations_project_id", "project_id"),
+        Index("ix_website_generations_owner_id", "owner_id"),
+        Index("ix_website_generations_status", "status"),
+    )
+
+    build_session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    source_prd_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("client_prds.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    source_prd_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    generation_version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    status: Mapped[WebsiteGenerationStatus] = mapped_column(
+        Enum(WebsiteGenerationStatus, name="website_generation_status", native_enum=False),
+        default=WebsiteGenerationStatus.PENDING,
+        nullable=False,
+    )
+    provider: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    specification_artifact_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("website_build_artifacts.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    error_code: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    generation_metadata: Mapped[Dict[str, Any]] = mapped_column("metadata", JSON, default=dict, nullable=False)
+
+    # Relationships
+    build_session: Mapped["WebsiteBuildSession"] = relationship(
+        back_populates="generations",
+        lazy="select",
+    )
+    project: Mapped["Project"] = relationship(lazy="select")
+    specification_artifact: Mapped[Optional["WebsiteBuildArtifact"]] = relationship(lazy="select")

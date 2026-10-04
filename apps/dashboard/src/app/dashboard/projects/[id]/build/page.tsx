@@ -7,6 +7,9 @@ import {
   type ProjectDetail,
   type WebsiteBuildSessionDetail,
   type WebsiteBuildSession,
+  type WebsiteGeneration,
+  type WebsiteGenerationDetail,
+  type WebsiteSpecification,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -25,6 +28,14 @@ import {
   Info,
   Calendar,
   Lock,
+  Cpu,
+  Compass,
+  Palette,
+  AlignLeft,
+  HelpCircle,
+  Code,
+  Layout,
+  ExternalLink,
 } from "lucide-react";
 
 export default function WebsiteBuildWorkspacePage({
@@ -38,8 +49,13 @@ export default function WebsiteBuildWorkspacePage({
   const [project, setProject] = useState<ProjectDetail | null>(null);
   const [sessions, setSessions] = useState<WebsiteBuildSession[]>([]);
   const [activeSession, setActiveSession] = useState<WebsiteBuildSessionDetail | null>(null);
+  const [generations, setGenerations] = useState<WebsiteGeneration[]>([]);
+  const [selectedGeneration, setSelectedGeneration] = useState<WebsiteGenerationDetail | null>(null);
+  const [activeSpecTab, setActiveSpecTab] = useState<"pages" | "navigation" | "design" | "content" | "raw">("pages");
+
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
+  const [genLoading, setGenLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -61,10 +77,24 @@ export default function WebsiteBuildWorkspacePage({
       const targetSessionId = active ? active.id : sessionListData.items[0]?.id;
 
       if (targetSessionId) {
-        const detail = await api.websiteBuilder.getSession(targetSessionId);
+        const [detail, gensList] = await Promise.all([
+          api.websiteBuilder.getSession(targetSessionId),
+          api.websiteBuilder.listGenerations(targetSessionId),
+        ]);
         setActiveSession(detail);
+        setGenerations(gensList.items);
+
+        // Auto-select latest generation if available
+        if (gensList.items.length > 0) {
+          const genDetail = await api.websiteBuilder.getGeneration(gensList.items[0].id);
+          setSelectedGeneration(genDetail);
+        } else {
+          setSelectedGeneration(null);
+        }
       } else {
         setActiveSession(null);
+        setGenerations([]);
+        setSelectedGeneration(null);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load build workspace data.");
@@ -104,7 +134,7 @@ export default function WebsiteBuildWorkspacePage({
         setSuccessMessage("Session moved to PLANNED.");
       } else if (action === "ready") {
         await api.websiteBuilder.readySession(activeSession.id, "Owner confirmed ready state");
-        setSuccessMessage("Session moved to READY.");
+        setSuccessMessage("Session moved to READY. Specification generation is now unlocked.");
       } else if (action === "pause") {
         await api.websiteBuilder.pauseSession(activeSession.id, "Owner requested pause");
         setSuccessMessage("Session moved to PAUSED.");
@@ -125,11 +155,49 @@ export default function WebsiteBuildWorkspacePage({
     }
   };
 
+  const handleTriggerGeneration = async () => {
+    if (!activeSession) return;
+    try {
+      setGenLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      await api.websiteBuilder.createGeneration(activeSession.id);
+      setSuccessMessage("AI Website Specification generated successfully.");
+      await loadData();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to generate website specification.");
+    } finally {
+      setGenLoading(false);
+    }
+  };
+
+  const handleSelectGeneration = async (genId: string) => {
+    try {
+      setActionLoading(true);
+      const detail = await api.websiteBuilder.getGeneration(genId);
+      setSelectedGeneration(detail);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load generation detail.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const handleSelectSession = async (sessionId: string) => {
     try {
       setActionLoading(true);
-      const detail = await api.websiteBuilder.getSession(sessionId);
+      const [detail, gensList] = await Promise.all([
+        api.websiteBuilder.getSession(sessionId),
+        api.websiteBuilder.listGenerations(sessionId),
+      ]);
       setActiveSession(detail);
+      setGenerations(gensList.items);
+      if (gensList.items.length > 0) {
+        const genDetail = await api.websiteBuilder.getGeneration(gensList.items[0].id);
+        setSelectedGeneration(genDetail);
+      } else {
+        setSelectedGeneration(null);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load session details.");
     } finally {
@@ -177,6 +245,8 @@ export default function WebsiteBuildWorkspacePage({
       case "ready":
         return "bg-emerald-500/10 text-emerald-400 border-emerald-500/30";
       case "in_progress":
+      case "generating":
+      case "validating":
         return "bg-amber-500/10 text-amber-400 border-amber-500/30";
       case "paused":
         return "bg-orange-500/10 text-orange-400 border-orange-500/30";
@@ -190,6 +260,8 @@ export default function WebsiteBuildWorkspacePage({
         return "bg-neutral-500/10 text-neutral-400 border-neutral-500/30";
     }
   };
+
+  const spec: WebsiteSpecification | undefined = selectedGeneration?.specification || undefined;
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto pb-16">
@@ -212,7 +284,7 @@ export default function WebsiteBuildWorkspacePage({
             </div>
             <h1 className="text-2xl font-bold tracking-tight text-[#F5F1EA] mt-0.5 flex items-center gap-2">
               <Hammer className="w-5 h-5 text-[#E8B968]" />
-              Website Build Workspace Foundation
+              Website Build &amp; Specification Workspace
             </h1>
           </div>
         </div>
@@ -227,7 +299,7 @@ export default function WebsiteBuildWorkspacePage({
           </div>
 
           <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-[#1B191E] border border-[#242126] text-xs text-[#F5F1EA]">
-            <span className="text-[#77717C]">Project Status:</span>
+            <span className="text-[#77717C]">Project:</span>
             <span className="font-semibold uppercase tracking-wider text-[#E8B968]">
               {project.project_status.replace(/_/g, " ")}
             </span>
@@ -250,16 +322,16 @@ export default function WebsiteBuildWorkspacePage({
         </div>
       )}
 
-      {/* Phase 6.1 Strict Architectural Boundary Notice */}
+      {/* Strict Architectural Boundary Notice */}
       <div className="p-4 rounded-xl bg-[#1B191E] border border-[#E8B968]/20 flex items-start gap-3">
         <Info className="w-5 h-5 text-[#E8B968] flex-shrink-0 mt-0.5" />
         <div className="text-xs text-[#A9A4AE] space-y-1">
           <p className="font-semibold text-[#F5F1EA]">
-            Phase 6.1 Workspace Foundation &amp; Immutability Controls
+            Phase 6.2 AI Website Generation Engine — Structured Specification Boundary
           </p>
           <p>
-            This workspace provides deterministic session state management, PRD version anchoring, and artifact tracking.
-            In strict compliance with Phase 6.1 boundaries, automatic code generation, GitHub repository creation, and Vercel deployments are deferred to subsequent phases.
+            Generates validated, comprehensive <span className="text-[#E8B968] font-mono">WebsiteSpecification</span> data anchored to your approved PRD.
+            In strict compliance with architectural boundaries, executable source code generation (React, Next.js, HTML, CSS), GitHub repository commits, and Vercel deployments remain deferred to subsequent phases.
           </p>
         </div>
       </div>
@@ -280,8 +352,9 @@ export default function WebsiteBuildWorkspacePage({
 
       {/* Main Grid: Session Controls + Detail */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Active Session / Session Actions */}
+        {/* Left 2 Columns: Active Session, Generation Controls, and Specification Viewer */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Active Build Session Card */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-[#242126] space-y-6">
             <div className="flex items-center justify-between border-b border-[#242126] pb-4">
               <div>
@@ -345,43 +418,7 @@ export default function WebsiteBuildWorkspacePage({
                   </div>
                 </div>
 
-                {/* Session ID / Timestamps Detail */}
-                <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2 text-xs">
-                  <div className="flex justify-between items-center text-[#77717C]">
-                    <span>Session ID:</span>
-                    <span className="font-mono text-[#F5F1EA]">{activeSession.id}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-[#77717C]">
-                    <span>Last Updated:</span>
-                    <span className="text-[#A9A4AE]">
-                      {new Date(activeSession.updated_at).toLocaleString()}
-                    </span>
-                  </div>
-                  {activeSession.started_at && (
-                    <div className="flex justify-between items-center text-[#77717C]">
-                      <span>Started At:</span>
-                      <span className="text-[#A9A4AE]">
-                        {new Date(activeSession.started_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                  {activeSession.completed_at && (
-                    <div className="flex justify-between items-center text-[#77717C]">
-                      <span>Completed At:</span>
-                      <span className="text-[#A9A4AE]">
-                        {new Date(activeSession.completed_at).toLocaleString()}
-                      </span>
-                    </div>
-                  )}
-                  {activeSession.failure_reason && (
-                    <div className="flex justify-between items-center text-red-400">
-                      <span>Failure Reason:</span>
-                      <span>{activeSession.failure_reason}</span>
-                    </div>
-                  )}
-                </div>
-
-                {/* State Machine Action Controls */}
+                {/* State Machine Transitions */}
                 <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
                   <span className="text-xs font-semibold text-[#77717C] uppercase tracking-wider block">
                     Session Lifecycle Transitions
@@ -426,58 +463,39 @@ export default function WebsiteBuildWorkspacePage({
                         Cancel Session
                       </button>
                     )}
-
-                    {["completed", "failed", "cancelled"].includes(activeSession.status) && (
-                      <span className="text-xs text-[#77717C] italic">
-                        This session is in terminal state ({activeSession.status}). Its state is immutable.
-                      </span>
-                    )}
                   </div>
                 </div>
 
-                {/* Build Artifacts */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-[#77717C] uppercase tracking-wider">
-                      Session Artifacts ({activeSession.artifacts?.length || 0})
-                    </span>
-                    <span className="text-[10px] text-[#77717C]">Controlled References Only</span>
-                  </div>
+                {/* AI Specification Generation Trigger (Phase 6.2) */}
+                <div className="p-5 rounded-xl bg-gradient-to-r from-[#1B191E] to-[#16141A] border border-[#E8B968]/30 space-y-4">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[#E8B968]" />
+                        <h3 className="text-sm font-bold text-[#F5F1EA]">
+                          AI Website Specification Engine
+                        </h3>
+                      </div>
+                      <p className="text-xs text-[#77717C]">
+                        Generate a comprehensive, structured WebsiteSpecification from PRD v{project.prd_version}.
+                      </p>
+                    </div>
 
-                  {activeSession.artifacts && activeSession.artifacts.length > 0 ? (
-                    <div className="space-y-2">
-                      {activeSession.artifacts.map((artifact) => (
-                        <div
-                          key={artifact.id}
-                          className="p-3.5 rounded-xl bg-[#1B191E] border border-[#242126] flex items-center justify-between text-xs"
-                        >
-                          <div className="flex items-center gap-3">
-                            <FileText className="w-4 h-4 text-[#E8B968]" />
-                            <div>
-                              <p className="font-semibold text-[#F5F1EA]">{artifact.artifact_name}</p>
-                              <p className="text-[10px] text-[#77717C] font-mono">
-                                Type: {artifact.artifact_type} • v{artifact.artifact_version}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-[#77717C]">
-                              {new Date(artifact.created_at).toLocaleString()}
-                            </span>
-                            {artifact.content_reference && (
-                              <p className="text-[10px] font-mono text-[#E8B968]">
-                                {artifact.content_reference}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="p-6 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
-                      No artifacts recorded for this session yet.
-                    </div>
-                  )}
+                    {activeSession.status === "ready" ? (
+                      <button
+                        onClick={handleTriggerGeneration}
+                        disabled={genLoading || actionLoading}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-[#E8B968] hover:bg-[#F5CC7A] text-[#141216] text-xs font-bold transition-all shadow-md disabled:opacity-50"
+                      >
+                        <Cpu className={`w-4 h-4 ${genLoading ? "animate-spin" : ""}`} />
+                        <span>{genLoading ? "Generating Specification..." : "Generate Website Specification"}</span>
+                      </button>
+                    ) : (
+                      <div className="text-xs text-[#77717C] bg-[#141216] px-3 py-1.5 rounded-lg border border-[#242126]">
+                        Requires session status: <span className="text-[#39C98A] font-semibold">READY</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             ) : (
@@ -492,10 +510,344 @@ export default function WebsiteBuildWorkspacePage({
               </div>
             )}
           </div>
+
+          {/* AI Website Specification Viewer (Phase 6.2 Output) */}
+          {selectedGeneration && (
+            <div className="p-6 rounded-2xl bg-[#131215] border border-[#242126] space-y-6">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 border-b border-[#242126] pb-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-semibold text-[#E8B968] uppercase tracking-wider">
+                      AI Website Specification
+                    </span>
+                    <span className="text-xs text-[#77717C]">•</span>
+                    <span className="text-xs font-mono text-[#F5F1EA]">
+                      Generation v{selectedGeneration.generation_version}
+                    </span>
+                  </div>
+                  <h3 className="text-lg font-bold text-[#F5F1EA] mt-0.5">
+                    {spec?.project_name || selectedGeneration.project_name || "Website Specification"}
+                  </h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-bold border uppercase ${getStatusBadge(
+                      selectedGeneration.status
+                    )}`}
+                  >
+                    {selectedGeneration.status}
+                  </span>
+                  <div className="px-3 py-1 rounded-xl bg-[#1B191E] border border-[#242126] text-xs font-mono text-[#77717C]">
+                    {selectedGeneration.provider}/{selectedGeneration.model}
+                  </div>
+                </div>
+              </div>
+
+              {spec ? (
+                <div className="space-y-6">
+                  {/* Specification Overview Chips */}
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Goal</span>
+                      <p className="text-[#F5F1EA] mt-1 line-clamp-2">{spec.website_goal}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Target Audience</span>
+                      <p className="text-[#F5F1EA] mt-1 line-clamp-2">{spec.target_audience}</p>
+                    </div>
+                    <div className="p-3 rounded-xl bg-[#1B191E] border border-[#242126]">
+                      <span className="text-[10px] text-[#77717C] uppercase font-semibold">Primary CTA</span>
+                      <p className="text-[#E8B968] font-bold mt-1">{spec.primary_cta}</p>
+                    </div>
+                  </div>
+
+                  {/* Navigation Tabs */}
+                  <div className="flex items-center gap-2 border-b border-[#242126] pb-2 text-xs">
+                    <button
+                      onClick={() => setActiveSpecTab("pages")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        activeSpecTab === "pages"
+                          ? "bg-[#E8B968] text-[#141216] font-bold"
+                          : "text-[#77717C] hover:text-[#F5F1EA]"
+                      }`}
+                    >
+                      Pages &amp; Sections ({spec.pages.length})
+                    </button>
+                    <button
+                      onClick={() => setActiveSpecTab("navigation")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        activeSpecTab === "navigation"
+                          ? "bg-[#E8B968] text-[#141216] font-bold"
+                          : "text-[#77717C] hover:text-[#F5F1EA]"
+                      }`}
+                    >
+                      Navigation Map ({spec.navigation.length})
+                    </button>
+                    <button
+                      onClick={() => setActiveSpecTab("design")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        activeSpecTab === "design"
+                          ? "bg-[#E8B968] text-[#141216] font-bold"
+                          : "text-[#77717C] hover:text-[#F5F1EA]"
+                      }`}
+                    >
+                      Design System
+                    </button>
+                    <button
+                      onClick={() => setActiveSpecTab("content")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        activeSpecTab === "content"
+                          ? "bg-[#E8B968] text-[#141216] font-bold"
+                          : "text-[#77717C] hover:text-[#F5F1EA]"
+                      }`}
+                    >
+                      Content Strategy ({spec.content_strategy?.length || 0})
+                    </button>
+                    <button
+                      onClick={() => setActiveSpecTab("raw")}
+                      className={`px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                        activeSpecTab === "raw"
+                          ? "bg-[#E8B968] text-[#141216] font-bold"
+                          : "text-[#77717C] hover:text-[#F5F1EA]"
+                      }`}
+                    >
+                      Raw Spec JSON
+                    </button>
+                  </div>
+
+                  {/* Tab Content: Pages & Sections */}
+                  {activeSpecTab === "pages" && (
+                    <div className="space-y-4">
+                      {spec.pages.map((p) => (
+                        <div
+                          key={p.page_id}
+                          className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3"
+                        >
+                          <div className="flex items-center justify-between border-b border-[#242126] pb-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-[#F5F1EA] text-sm">{p.name}</span>
+                              <span className="font-mono text-xs text-[#E8B968] bg-[#E8B968]/10 px-2 py-0.5 rounded">
+                                {p.path}
+                              </span>
+                            </div>
+                            <span className="text-[10px] text-[#77717C] uppercase font-semibold">
+                              {p.sections.length} Sections
+                            </span>
+                          </div>
+
+                          <div className="text-xs text-[#77717C] space-y-1">
+                            <p><span className="text-[#F5F1EA]">SEO Title:</span> {p.seo_title}</p>
+                            <p><span className="text-[#F5F1EA]">Purpose:</span> {p.purpose}</p>
+                          </div>
+
+                          <div className="space-y-2 pt-2 border-t border-[#242126]/60">
+                            <span className="text-[10px] font-semibold text-[#77717C] uppercase tracking-wider block">
+                              Sections Structure
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {p.sections.map((s) => (
+                                <div
+                                  key={s.section_id}
+                                  className="p-3 rounded-lg bg-[#141216] border border-[#242126] text-xs space-y-1"
+                                >
+                                  <div className="flex items-center justify-between">
+                                    <span className="font-semibold text-[#F5F1EA]">{s.heading}</span>
+                                    <span className="text-[10px] font-mono text-[#E8B968] uppercase">
+                                      {s.type}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-[#77717C]">{s.purpose}</p>
+                                  <div className="flex flex-wrap gap-1 pt-1">
+                                    {s.components.map((c) => (
+                                      <span
+                                        key={c}
+                                        className="text-[9px] font-mono bg-[#242126] text-[#A9A4AE] px-1.5 py-0.5 rounded"
+                                      >
+                                        {c}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Tab Content: Navigation Map */}
+                  {activeSpecTab === "navigation" && (
+                    <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-[#242126] text-[#77717C]">
+                            <th className="pb-2 font-semibold">Order</th>
+                            <th className="pb-2 font-semibold">Label</th>
+                            <th className="pb-2 font-semibold">Path</th>
+                            <th className="pb-2 font-semibold">Visibility</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-[#242126]">
+                          {spec.navigation.map((n) => (
+                            <tr key={n.path} className="text-[#F5F1EA]">
+                              <td className="py-2.5 font-mono text-[#77717C]">{n.order}</td>
+                              <td className="py-2.5 font-semibold">{n.label}</td>
+                              <td className="py-2.5 font-mono text-[#E8B968]">{n.path}</td>
+                              <td className="py-2.5 capitalize text-[#39C98A]">{n.visibility}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+
+                  {/* Tab Content: Design System */}
+                  {activeSpecTab === "design" && (
+                    <div className="space-y-4 text-xs">
+                      {/* Visual Direction */}
+                      <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                        <span className="text-[10px] text-[#77717C] uppercase font-semibold">Visual Direction</span>
+                        <p className="text-[#F5F1EA] text-sm">{spec.design_system.visual_direction}</p>
+                      </div>
+
+                      {/* Color Palette */}
+                      <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
+                        <span className="text-[10px] text-[#77717C] uppercase font-semibold">Color Palette</span>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                          {Object.entries(spec.design_system.color_palette).map(([name, hex]) => (
+                            <div key={name} className="flex items-center gap-2.5 p-2 rounded-lg bg-[#141216] border border-[#242126]">
+                              <div
+                                className="w-5 h-5 rounded-md border border-white/10 flex-shrink-0"
+                                style={{ backgroundColor: hex }}
+                              />
+                              <div>
+                                <p className="font-semibold text-[#F5F1EA] capitalize text-[11px]">{name}</p>
+                                <p className="font-mono text-[9px] text-[#77717C]">{hex}</p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Typography */}
+                      <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-2">
+                        <span className="text-[10px] text-[#77717C] uppercase font-semibold">Typography</span>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <span className="text-[#77717C]">Heading Family:</span>
+                            <p className="font-bold text-[#F5F1EA]">{spec.design_system.typography.heading_family}</p>
+                          </div>
+                          <div>
+                            <span className="text-[#77717C]">Body Family:</span>
+                            <p className="font-bold text-[#F5F1EA]">{spec.design_system.typography.body_family}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tab Content: Content Strategy */}
+                  {activeSpecTab === "content" && (
+                    <div className="space-y-3">
+                      {spec.content_strategy && spec.content_strategy.length > 0 ? (
+                        spec.content_strategy.map((c, i) => (
+                          <div
+                            key={i}
+                            className="p-3.5 rounded-xl bg-[#1B191E] border border-[#242126] text-xs flex justify-between items-center"
+                          >
+                            <div>
+                              <p className="font-semibold text-[#F5F1EA]">{c.content_type}</p>
+                              <p className="text-[11px] text-[#77717C]">
+                                Page: <span className="font-mono text-[#E8B968]">{c.page}</span> • Section:{" "}
+                                <span className="font-mono text-[#A9A4AE]">{c.section}</span>
+                              </p>
+                              {c.notes && <p className="text-[10px] text-[#77717C] mt-1">{c.notes}</p>}
+                            </div>
+                            <span className="px-2 py-0.5 rounded text-[10px] font-mono bg-[#242126] text-[#E8B968]">
+                              {c.source}
+                            </span>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="p-6 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                          No specific content strategy items mapped.
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tab Content: Raw JSON */}
+                  {activeSpecTab === "raw" && (
+                    <pre className="p-4 rounded-xl bg-[#0C0B0D] border border-[#242126] text-[11px] font-mono text-[#A9A4AE] overflow-x-auto max-h-[450px]">
+                      {JSON.stringify(spec, null, 2)}
+                    </pre>
+                  )}
+                </div>
+              ) : (
+                <div className="p-6 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                  {selectedGeneration.status === "failed" ? (
+                    <span className="text-red-400">Generation failed: {selectedGeneration.error_message}</span>
+                  ) : (
+                    <span>Specification is being processed...</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
-        {/* Right Column: Project & Session History */}
+        {/* Right Column: Generation History & Session Baseline */}
         <div className="space-y-6">
+          {/* Generation History Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-[#242126] space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-[#77717C] uppercase tracking-wider">
+                Specification History ({generations.length})
+              </span>
+              <Cpu className="w-4 h-4 text-[#E8B968]" />
+            </div>
+
+            {generations.length > 0 ? (
+              <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                {generations.map((g) => {
+                  const isSelected = selectedGeneration?.id === g.id;
+                  return (
+                    <button
+                      key={g.id}
+                      onClick={() => handleSelectGeneration(g.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all text-xs ${
+                        isSelected
+                          ? "bg-[#1B191E] border-[#E8B968]"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-[#38333D]"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#F5F1EA]">Spec v{g.generation_version}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${getStatusBadge(
+                            g.status
+                          )}`}
+                        >
+                          {g.status}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-2 text-[10px] text-[#77717C]">
+                        <span>{new Date(g.created_at).toLocaleDateString()}</span>
+                        <span className="font-mono">{g.provider}</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No specification generations yet.
+              </div>
+            )}
+          </div>
+
           {/* PRD Reference Card */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-[#242126] space-y-4">
             <div className="flex items-center justify-between border-b border-[#242126] pb-3">
@@ -520,14 +872,6 @@ export default function WebsiteBuildWorkspacePage({
                 <span>Gate 4 Status:</span>
                 <span className="text-[#39C98A] font-semibold">Approved</span>
               </div>
-              {project.prd_summary?.title && (
-                <div className="pt-2 border-t border-[#242126]">
-                  <span className="text-[10px] text-[#77717C] uppercase">PRD Title</span>
-                  <p className="text-xs text-[#F5F1EA] font-medium mt-0.5">
-                    {project.prd_summary.title}
-                  </p>
-                </div>
-              )}
             </div>
           </div>
 
@@ -541,7 +885,7 @@ export default function WebsiteBuildWorkspacePage({
             </div>
 
             {sessions.length > 0 ? (
-              <div className="space-y-2 max-h-[360px] overflow-y-auto pr-1">
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
                 {sessions.map((s) => {
                   const isSelected = activeSession?.id === s.id;
                   return (
@@ -555,7 +899,7 @@ export default function WebsiteBuildWorkspacePage({
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-bold text-[#F5F1EA]">v{s.build_version}</span>
+                        <span className="font-bold text-[#F5F1EA]">Session v{s.build_version}</span>
                         <span
                           className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase border ${getStatusBadge(
                             s.status
