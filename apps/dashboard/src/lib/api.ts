@@ -575,8 +575,69 @@ export const api = {
         `/api/v1/code-generations/${generationId}/files${q}`
       );
     },
+    // Phase 6.5 Live Preview
+    createPreview: (projectId: string, codeGenerationId?: string) =>
+      apiFetch<WebsitePreview>(`/api/v1/projects/${projectId}/previews`, {
+        method: "POST",
+        body: JSON.stringify({ code_generation_id: codeGenerationId }),
+      }),
+    listPreviews: (projectId: string) =>
+      apiFetch<WebsitePreviewListResponse>(
+        `/api/v1/projects/${projectId}/previews`
+      ),
+    getPreview: (previewId: string) =>
+      apiFetch<WebsitePreview>(`/api/v1/previews/${previewId}`),
+    startPreview: (previewId: string) =>
+      apiFetch<WebsitePreview>(`/api/v1/previews/${previewId}/start`, {
+        method: "POST",
+      }),
+    stopPreview: (previewId: string) =>
+      apiFetch<WebsitePreview>(`/api/v1/previews/${previewId}/stop`, {
+        method: "POST",
+      }),
+    restartPreview: (previewId: string) =>
+      apiFetch<WebsitePreview>(`/api/v1/previews/${previewId}/restart`, {
+        method: "POST",
+      }),
+    getPreviewStatus: (previewId: string) =>
+      apiFetch<WebsitePreviewStatusResponse>(
+        `/api/v1/previews/${previewId}/status`
+      ),
+    // Phase 6.5 Iterative Editing
+    createEdit: (
+      projectId: string,
+      payload: { owner_request: string; base_version: number; preview_id?: string }
+    ) =>
+      apiFetch<WebsiteEditDetail>(`/api/v1/projects/${projectId}/edits`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    listEdits: (projectId: string) =>
+      apiFetch<WebsiteEditListResponse>(`/api/v1/projects/${projectId}/edits`),
+    getEdit: (editId: string) =>
+      apiFetch<WebsiteEditDetail>(`/api/v1/edits/${editId}`),
+    cancelEdit: (editId: string, reason?: string) =>
+      apiFetch<WebsiteEdit>(`/api/v1/edits/${editId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+    // Phase 6.5 Versioning & Rollback
+    listVersions: (projectId: string) =>
+      apiFetch<WebsiteVersionListResponse>(
+        `/api/v1/projects/${projectId}/versions`
+      ),
+    getVersion: (versionId: string) =>
+      apiFetch<WebsiteEditVersion>(`/api/v1/versions/${versionId}`),
+    rollbackVersion: (versionId: string) =>
+      apiFetch<WebsiteVersionRollbackResponse>(
+        `/api/v1/versions/${versionId}/rollback`,
+        {
+          method: "POST",
+        }
+      ),
   },
 };
+
 
 
 
@@ -1220,4 +1281,117 @@ export interface WebsiteCodeGenerationManifestResponse {
 export interface WebsiteCodeGenerationFilesResponse {
   generation_id: string;
   files: GeneratedWebsiteFile[];
+}
+
+// ── Phase 6.5 Website Preview & Edit Types ─────────────────────────────────────
+
+export type WebsitePreviewStatus =
+  | "created"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "stopped"
+  | "failed"
+  | "expired";
+
+export type WebsiteEditSessionStatus =
+  | "pending"
+  | "analyzing"
+  | "generating"
+  | "validating"
+  | "applied"
+  | "failed"
+  | "cancelled";
+
+export interface WebsitePreview {
+  id: string;
+  project_id: string;
+  build_session_id: string;
+  code_generation_id: string;
+  version: number;
+  status: WebsitePreviewStatus;
+  preview_token: string;
+  preview_url: string;
+  port?: number | null;
+  workspace_reference: string;
+  started_at?: string | null;
+  stopped_at?: string | null;
+  expires_at?: string | null;
+  last_error?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WebsitePreviewStatusResponse {
+  preview_id: string;
+  project_id: string;
+  status: WebsitePreviewStatus;
+  version: number;
+  is_running: boolean;
+  uptime_seconds?: number | null;
+  preview_url: string;
+  last_error?: string | null;
+}
+
+export interface WebsitePreviewListResponse {
+  previews: WebsitePreview[];
+  total_count: number;
+}
+
+export interface WebsiteEdit {
+  id: string;
+  project_id: string;
+  preview_id?: string | null;
+  base_code_generation_id: string;
+  base_version: number;
+  status: WebsiteEditSessionStatus;
+  owner_request: string;
+  error_code?: string | null;
+  error_message?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WebsiteEditDetail {
+  edit: WebsiteEdit;
+  changed_files: string[];
+  diff_summary?: string | null;
+  version_created?: number | null;
+  new_version_id?: string | null;
+}
+
+export interface WebsiteEditListResponse {
+  edits: WebsiteEdit[];
+  total_count: number;
+}
+
+export interface WebsiteEditVersion {
+  id: string;
+  project_id: string;
+  edit_session_id?: string | null;
+  source_generation_id: string;
+  parent_version?: number | null;
+  version: number;
+  changed_files: string[];
+  diff_summary?: string | null;
+  source_checksum: string;
+  artifact_id?: string | null;
+  is_active: boolean;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface WebsiteVersionListResponse {
+  versions: WebsiteEditVersion[];
+  current_version: number;
+  total_count: number;
+}
+
+export interface WebsiteVersionRollbackResponse {
+  message: string;
+  rolled_back_to_version: number;
+  new_version: number;
+  version_record: WebsiteEditVersion;
 }

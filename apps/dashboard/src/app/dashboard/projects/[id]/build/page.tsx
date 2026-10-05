@@ -16,6 +16,11 @@ import {
   type WebsiteCodeGeneration,
   type WebsiteCodeGenerationDetail,
   type GeneratedWebsiteFile,
+  type WebsitePreview,
+  type WebsitePreviewStatusResponse,
+  type WebsiteEdit,
+  type WebsiteEditDetail,
+  type WebsiteEditVersion,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -53,7 +58,17 @@ import {
   Terminal,
   Check,
   Copy,
+  Play,
+  Square,
+  RotateCw,
+  Monitor,
+  Tablet,
+  Smartphone,
+  Wand2,
+  Undo2,
+  RefreshCw,
 } from "lucide-react";
+
 
 
 export default function WebsiteBuildWorkspacePage({
@@ -84,6 +99,22 @@ export default function WebsiteBuildWorkspacePage({
   const [codeFiles, setCodeFiles] = useState<GeneratedWebsiteFile[]>([]);
   const [selectedFile, setSelectedFile] = useState<GeneratedWebsiteFile | null>(null);
   const [activeCodeGenTab, setActiveCodeGenTab] = useState<"manifest" | "code" | "routes" | "raw">("manifest");
+
+  // Phase 6.5 Live Preview & Iterative Editing State
+  const [previews, setPreviews] = useState<WebsitePreview[]>([]);
+  const [activePreview, setActivePreview] = useState<WebsitePreview | null>(null);
+  const [previewStatus, setPreviewStatus] = useState<WebsitePreviewStatusResponse | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewDevice, setPreviewDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
+  const [previewKey, setPreviewKey] = useState<number>(0);
+
+  const [versions, setVersions] = useState<WebsiteEditVersion[]>([]);
+  const [currentVersion, setCurrentVersion] = useState<number>(1);
+  const [edits, setEdits] = useState<WebsiteEdit[]>([]);
+  const [lastEditDetail, setLastEditDetail] = useState<WebsiteEditDetail | null>(null);
+  const [editPrompt, setEditPrompt] = useState<string>("");
+  const [editLoading, setEditLoading] = useState<boolean>(false);
+  const [rollbackLoading, setRollbackLoading] = useState<boolean>(false);
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -137,6 +168,37 @@ export default function WebsiteBuildWorkspacePage({
     }
   }, []);
 
+  const loadPreviewsAndVersions = useCallback(async (projId: string) => {
+    try {
+      const [prevList, verList, editList] = await Promise.all([
+        api.websiteBuilder.listPreviews(projId),
+        api.websiteBuilder.listVersions(projId),
+        api.websiteBuilder.listEdits(projId),
+      ]);
+      setPreviews(prevList.previews);
+      if (prevList.previews.length > 0) {
+        const topPrev = prevList.previews[0];
+        setActivePreview(topPrev);
+        try {
+          const statusResp = await api.websiteBuilder.getPreviewStatus(topPrev.id);
+          setPreviewStatus(statusResp);
+        } catch {
+          // Ignore status probe failures
+        }
+      } else {
+        setActivePreview(null);
+        setPreviewStatus(null);
+      }
+      setVersions(verList.versions);
+      setCurrentVersion(verList.current_version);
+      setEdits(editList.edits);
+    } catch {
+      setPreviews([]);
+      setVersions([]);
+      setEdits([]);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -147,6 +209,9 @@ export default function WebsiteBuildWorkspacePage({
       ]);
       setProject(projData);
       setSessions(sessionListData.items);
+
+      // Load Previews, Edits, and Versions for project
+      await loadPreviewsAndVersions(projectId);
 
       // Find current active session or most recent session
       const active = sessionListData.items.find((s) =>
@@ -191,7 +256,8 @@ export default function WebsiteBuildWorkspacePage({
     } finally {
       setLoading(false);
     }
-  }, [projectId, loadBlueprintsForGen, loadCodeGensForSession]);
+  }, [projectId, loadBlueprintsForGen, loadCodeGensForSession, loadPreviewsAndVersions]);
+
 
 
   useEffect(() => {
@@ -387,6 +453,111 @@ export default function WebsiteBuildWorkspacePage({
   const handleSelectFile = (file: GeneratedWebsiteFile) => {
     setSelectedFile(file);
     setActiveCodeGenTab("code");
+  };
+
+  // Phase 6.5 Handlers
+  const handleCreatePreview = async () => {
+    try {
+      setPreviewLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const newPrev = await api.websiteBuilder.createPreview(projectId, selectedCodeGen?.id);
+      setSuccessMessage(`Live preview workspace prepared for v${newPrev.version}.`);
+      await loadPreviewsAndVersions(projectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create live preview.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleStartPreview = async (previewId: string) => {
+    try {
+      setPreviewLoading(true);
+      setError(null);
+      await api.websiteBuilder.startPreview(previewId);
+      setSuccessMessage("Live preview server running.");
+      setPreviewKey((k) => k + 1);
+      await loadPreviewsAndVersions(projectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to start preview server.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleStopPreview = async (previewId: string) => {
+    try {
+      setPreviewLoading(true);
+      setError(null);
+      await api.websiteBuilder.stopPreview(previewId);
+      setSuccessMessage("Live preview server stopped.");
+      await loadPreviewsAndVersions(projectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to stop preview server.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleRestartPreview = async (previewId: string) => {
+    try {
+      setPreviewLoading(true);
+      setError(null);
+      await api.websiteBuilder.restartPreview(previewId);
+      setSuccessMessage("Live preview server restarted.");
+      setPreviewKey((k) => k + 1);
+      await loadPreviewsAndVersions(projectId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to restart preview server.");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
+  const handleApplyEdit = async () => {
+    if (!editPrompt.trim()) return;
+    try {
+      setEditLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const detail = await api.websiteBuilder.createEdit(projectId, {
+        owner_request: editPrompt.trim(),
+        base_version: currentVersion,
+        preview_id: activePreview?.id,
+      });
+      setLastEditDetail(detail);
+      setSuccessMessage(`Iterative edit applied! New release v${detail.version_created} is live.`);
+      setEditPrompt("");
+      setPreviewKey((k) => k + 1);
+      await loadPreviewsAndVersions(projectId);
+      if (activeSession) {
+        await loadCodeGensForSession(activeSession.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to apply website edit.");
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const handleRollbackVersion = async (versionId: string) => {
+    try {
+      setRollbackLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const resp = await api.websiteBuilder.rollbackVersion(versionId);
+      setSuccessMessage(resp.message);
+      setPreviewKey((k) => k + 1);
+      await loadPreviewsAndVersions(projectId);
+      if (activeSession) {
+        await loadCodeGensForSession(activeSession.id);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rollback version.");
+    } finally {
+      setRollbackLoading(false);
+    }
   };
 
 
@@ -1585,7 +1756,334 @@ export default function WebsiteBuildWorkspacePage({
               </div>
             )}
           </div>
+
+          {/* Phase 6.5 Live Preview Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-blue-500/30 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#242126] gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/30 flex items-center justify-center">
+                  <Eye className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[#F5F1EA]">Live Website Preview</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-blue-500/10 text-blue-400 border border-blue-500/30">
+                      Phase 6.5
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#77717C]">
+                    Isolated sandboxed runtime executing validated Next.js source code.
+                  </p>
+                </div>
+              </div>
+
+              {/* Top Controls: Start / Stop / Restart / Create */}
+              <div className="flex items-center gap-2">
+                {activePreview ? (
+                  <>
+                    {activePreview.status === "running" ? (
+                      <button
+                        onClick={() => handleStopPreview(activePreview.id)}
+                        disabled={previewLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-red-500/10 text-red-300 border border-red-500/30 text-xs font-semibold hover:bg-red-500/20 transition-all disabled:opacity-50"
+                      >
+                        <Square className="w-3.5 h-3.5" />
+                        Stop Server
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStartPreview(activePreview.id)}
+                        disabled={previewLoading}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/10 text-emerald-300 border border-emerald-500/30 text-xs font-semibold hover:bg-emerald-500/20 transition-all disabled:opacity-50"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        Start Server
+                      </button>
+                    )}
+                    <button
+                      onClick={() => handleRestartPreview(activePreview.id)}
+                      disabled={previewLoading}
+                      className="p-1.5 rounded-lg bg-[#1B191E] border border-[#242126] text-[#A9A4AE] hover:text-[#F5F1EA] transition-all disabled:opacity-50"
+                      title="Restart Preview Server"
+                    >
+                      <RotateCw className="w-4 h-4" />
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={handleCreatePreview}
+                    disabled={previewLoading || !codeGenerations.some((c) => c.status === "completed")}
+                    className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-500/15 text-blue-300 border border-blue-500/40 text-xs font-bold hover:bg-blue-500/25 transition-all disabled:opacity-50"
+                  >
+                    {previewLoading ? (
+                      <>
+                        <div className="w-3.5 h-3.5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin" />
+                        Preparing Preview...
+                      </>
+                    ) : (
+                      <>
+                        <Eye className="w-4 h-4" />
+                        Prepare Live Preview
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {activePreview ? (
+              <div className="space-y-4">
+                {/* Preview Meta Bar */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-3 rounded-xl bg-[#1B191E] border border-[#242126] text-xs">
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Active Release</span>
+                    <span className="font-mono text-blue-400 font-bold">Release v{activePreview.version}</span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Server Status</span>
+                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase border mt-0.5 ${getStatusBadge(activePreview.status)}`}>
+                      {activePreview.status}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Uptime</span>
+                    <span className="text-[#F5F1EA] font-mono text-[11px]">
+                      {previewStatus?.uptime_seconds !== undefined && previewStatus?.uptime_seconds !== null
+                        ? `${Math.floor(previewStatus.uptime_seconds / 60)}m ${previewStatus.uptime_seconds % 60}s`
+                        : "Inactive"}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[#77717C] block text-[10px] uppercase">Port / Sandbox</span>
+                    <span className="font-mono text-[#A9A4AE] text-[11px] truncate block">
+                      {activePreview.port ? `localhost:${activePreview.port}` : "Isolated Iframe"}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Device Selector & Responsive Bar */}
+                <div className="flex items-center justify-between p-2 rounded-xl bg-[#1B191E] border border-[#242126] text-xs">
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => setPreviewDevice("desktop")}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${
+                        previewDevice === "desktop"
+                          ? "bg-blue-500/20 text-blue-300 font-semibold"
+                          : "text-[#77717C] hover:text-[#A9A4AE]"
+                      }`}
+                    >
+                      <Monitor className="w-3.5 h-3.5" />
+                      Desktop
+                    </button>
+                    <button
+                      onClick={() => setPreviewDevice("tablet")}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${
+                        previewDevice === "tablet"
+                          ? "bg-blue-500/20 text-blue-300 font-semibold"
+                          : "text-[#77717C] hover:text-[#A9A4AE]"
+                      }`}
+                    >
+                      <Tablet className="w-3.5 h-3.5" />
+                      Tablet (768px)
+                    </button>
+                    <button
+                      onClick={() => setPreviewDevice("mobile")}
+                      className={`flex items-center gap-1.5 px-3 py-1 rounded-lg transition-all ${
+                        previewDevice === "mobile"
+                          ? "bg-blue-500/20 text-blue-300 font-semibold"
+                          : "text-[#77717C] hover:text-[#A9A4AE]"
+                      }`}
+                    >
+                      <Smartphone className="w-3.5 h-3.5" />
+                      Mobile (375px)
+                    </button>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setPreviewKey((k) => k + 1)}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[#77717C] hover:text-[#F5F1EA] hover:bg-[#242126] transition-all"
+                      title="Reload Iframe"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      Reload
+                    </button>
+                    <span className="text-[10px] text-[#77717C] border-l border-[#242126] pl-2 font-mono">
+                      Safe Sandbox Active
+                    </span>
+                  </div>
+                </div>
+
+                {/* Sandboxed Iframe Container */}
+                <div className="rounded-xl border border-[#242126] bg-[#0A0A0C] overflow-hidden flex justify-center p-2 min-h-[520px]">
+                  {activePreview.status === "running" ? (
+                    <div
+                      className="transition-all duration-300 bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col"
+                      style={{
+                        width:
+                          previewDevice === "mobile"
+                            ? "375px"
+                            : previewDevice === "tablet"
+                            ? "768px"
+                            : "100%",
+                        height: "550px",
+                      }}
+                    >
+                      <iframe
+                        key={previewKey}
+                        src={`/api/v1/previews/${activePreview.id}/render`}
+                        className="w-full h-full border-0"
+                        sandbox="allow-scripts allow-same-origin"
+                        title={`Live Preview v${activePreview.version}`}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full flex flex-col items-center justify-center p-12 text-center text-xs text-[#77717C] space-y-3">
+                      <PauseCircle className="w-10 h-10 text-blue-400/40" />
+                      <p className="font-semibold text-[#F5F1EA] text-sm">Preview Server is Stopped</p>
+                      <p className="max-w-md">
+                        The isolated preview server is currently stopped. Click &quot;Start Server&quot; to boot the runtime and render your generated website.
+                      </p>
+                      <button
+                        onClick={() => handleStartPreview(activePreview.id)}
+                        disabled={previewLoading}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold transition-all text-xs"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        Start Preview Server
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C] space-y-2">
+                <Eye className="w-8 h-8 text-blue-400/40 mx-auto" />
+                <p className="font-semibold text-[#F5F1EA]">No Live Preview Created</p>
+                <p>Prepare a preview environment to inspect your generated Next.js code interactively in an isolated container.</p>
+              </div>
+            )}
+          </div>
+
+          {/* Phase 6.5 Iterative Website Editing Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-purple-500/30 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-[#242126] gap-4">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-purple-500/10 border border-purple-500/30 flex items-center justify-center">
+                  <Wand2 className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-[#F5F1EA]">Iterative Website Editing</h3>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase bg-purple-500/10 text-purple-400 border border-purple-500/30">
+                      Phase 6.5
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#77717C]">
+                    Request targeted modifications. AI updates only affected components and design tokens.
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 text-xs">
+                <span className="text-[#77717C]">Base Version:</span>
+                <span className="px-2.5 py-1 rounded bg-[#1B191E] border border-[#242126] font-mono font-bold text-purple-300">
+                  Release v{currentVersion}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick Action Chips */}
+            <div className="space-y-2">
+              <span className="text-[11px] font-semibold text-[#77717C] uppercase tracking-wider block">
+                Quick Action Prompts
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {[
+                  "Make the hero section darker with slate-950 theme",
+                  "Change primary CTA button text to Claim Free Consultation",
+                  "Make navigation header sticky with backdrop-blur",
+                  "Reduce vertical spacing in the services section",
+                  "Add social proof and testimonials integration",
+                ].map((chip) => (
+                  <button
+                    key={chip}
+                    type="button"
+                    onClick={() => setEditPrompt(chip)}
+                    className="px-3 py-1 rounded-lg bg-[#1B191E] border border-[#242126] hover:border-purple-500/50 text-[11px] text-[#A9A4AE] hover:text-[#F5F1EA] transition-all"
+                  >
+                    + {chip}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Edit Prompt Textarea */}
+            <div className="space-y-3">
+              <textarea
+                value={editPrompt}
+                onChange={(e) => setEditPrompt(e.target.value)}
+                placeholder="Describe your desired website changes (e.g., 'Make the hero section darker and reduce the vertical spacing in services')..."
+                className="w-full h-24 p-4 rounded-xl bg-[#1B191E] border border-[#242126] focus:border-purple-500 text-xs text-[#F5F1EA] placeholder-[#77717C] focus:outline-none resize-none leading-relaxed"
+                disabled={editLoading}
+              />
+
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] text-[#77717C]">
+                  Minimal Change Rule active: Only modified files are rewritten. History remains fully recoverable.
+                </span>
+                <button
+                  onClick={handleApplyEdit}
+                  disabled={editLoading || !editPrompt.trim() || !codeGenerations.some((c) => c.status === "completed")}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs transition-all disabled:opacity-50 shadow-lg shadow-purple-600/20"
+                >
+                  {editLoading ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      Analyzing & Applying Edit...
+                    </>
+                  ) : (
+                    <>
+                      <Wand2 className="w-4 h-4" />
+                      Apply Change
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Last Edit Diff Summary */}
+            {lastEditDetail && (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-purple-500/20 space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-[#F5F1EA] flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                    Last Applied Edit (v{lastEditDetail.version_created})
+                  </span>
+                  <span className="text-[10px] text-purple-300 font-mono">
+                    {lastEditDetail.changed_files.length} file(s) modified
+                  </span>
+                </div>
+                <p className="text-[#A9A4AE] bg-[#131215] p-3 rounded-lg border border-[#242126]">
+                  {lastEditDetail.diff_summary || "Targeted modifications applied successfully."}
+                </p>
+                <div>
+                  <span className="text-[10px] uppercase font-semibold text-[#77717C] block mb-1">
+                    Affected Files
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 font-mono text-[10px]">
+                    {lastEditDetail.changed_files.map((f) => (
+                      <span key={f} className="px-2 py-0.5 rounded bg-[#242126] text-purple-300">
+                        {f}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
+
 
         {/* Right Column: Generation History, Blueprint History & Session Baseline */}
         <div className="space-y-6">
@@ -1636,6 +2134,71 @@ export default function WebsiteBuildWorkspacePage({
               </div>
             )}
           </div>
+
+          {/* Phase 6.5 Version History & Rollback Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-purple-500/30 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-purple-400 uppercase tracking-wider">
+                Release Versions ({versions.length})
+              </span>
+              <History className="w-4 h-4 text-purple-400" />
+            </div>
+
+            {versions.length > 0 ? (
+              <div className="space-y-2 max-h-[300px] overflow-y-auto pr-1">
+                {versions.map((ver) => {
+                  const isActive = ver.version === currentVersion;
+                  return (
+                    <div
+                      key={ver.id}
+                      className={`p-3 rounded-xl border text-xs space-y-2 transition-all ${
+                        isActive
+                          ? "bg-[#1B191E] border-purple-500"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-purple-500/30"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-[#F5F1EA]">Release v{ver.version}</span>
+                          {isActive && (
+                            <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        {!isActive && (
+                          <button
+                            onClick={() => handleRollbackVersion(ver.id)}
+                            disabled={rollbackLoading}
+                            className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#242126] hover:bg-purple-600 hover:text-white text-[10px] font-semibold text-[#A9A4AE] transition-all disabled:opacity-50"
+                          >
+                            <Undo2 className="w-3 h-3" />
+                            Rollback
+                          </button>
+                        )}
+                      </div>
+
+                      {ver.diff_summary && (
+                        <p className="text-[11px] text-[#A9A4AE] line-clamp-2">
+                          {ver.diff_summary}
+                        </p>
+                      )}
+
+                      <div className="flex justify-between items-center text-[10px] text-[#77717C] pt-1 border-t border-[#242126]/60">
+                        <span>{new Date(ver.created_at).toLocaleDateString()}</span>
+                        <span className="font-mono">{ver.changed_files.length} changed</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No edit versions yet. Current baseline is v1.
+              </div>
+            )}
+          </div>
+
 
           {/* Blueprint History Card (Phase 6.3) */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-cyan-500/30 space-y-4">

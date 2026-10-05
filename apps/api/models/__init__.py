@@ -337,6 +337,11 @@ from models.website_builder import (
     DesignBlueprintStatus,
     WebsiteCodeGeneration,
     WebsiteCodeGenerationStatus,
+    WebsitePreview,
+    WebsitePreviewStatus,
+    WebsiteEditSession,
+    WebsiteEditSessionStatus,
+    WebsiteEditVersion,
 )
 
 __all__ = [
@@ -409,4 +414,10 @@ __all__ = [
     # Phase 6.4
     "WebsiteCodeGeneration",
     "WebsiteCodeGenerationStatus",
+    # Phase 6.5
+    "WebsitePreview",
+    "WebsitePreviewStatus",
+    "WebsiteEditSession",
+    "WebsiteEditSessionStatus",
+    "WebsiteEditVersion",
 ]

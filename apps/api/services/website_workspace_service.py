@@ -182,3 +182,69 @@ class WebsiteWorkspaceService:
                 log.warning("workspace_cleanup_failed", generation_id=str(generation_id), error=str(exc))
                 return False
         return False
+
+    @classmethod
+    def get_preview_workspace_dir(cls, project_id: uuid.UUID, preview_id: uuid.UUID) -> Path:
+        """Returns the isolated preview workspace directory path."""
+        return Path(WORKSPACE_BASE_DIR).resolve() / "previews" / str(project_id) / str(preview_id)
+
+    @classmethod
+    def get_version_workspace_dir(cls, project_id: uuid.UUID, version: int) -> Path:
+        """Returns the isolated workspace directory path for a specific version."""
+        return Path(WORKSPACE_BASE_DIR).resolve() / "versions" / str(project_id) / f"v{version}"
+
+    @classmethod
+    def copy_directory(cls, src_dir: Path, dst_dir: Path) -> None:
+        """Safely copies all files from src_dir to dst_dir, replacing dst_dir contents."""
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        for item in src_dir.rglob("*"):
+            if item.is_file():
+                rel_path = item.relative_to(src_dir)
+                target_file = dst_dir / rel_path
+                target_file.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(item, target_file)
+
+    @classmethod
+    def read_project_from_dir(cls, ws_dir: Path) -> GeneratedWebsiteProject:
+        """Reconstitutes a GeneratedWebsiteProject from an existing workspace directory."""
+        manifest: Optional[Dict[str, Any]] = None
+        manifest_path = ws_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+
+        files: List[GeneratedWebsiteFile] = []
+        for item in ws_dir.rglob("*"):
+            if item.is_file():
+                rel_path = item.relative_to(ws_dir).as_posix()
+                if rel_path == "manifest.json":
+                    continue
+                content = item.read_text(encoding="utf-8", errors="replace")
+                ext = item.suffix.lstrip(".") or "txt"
+                content_bytes = content.encode("utf-8")
+                checksum = hashlib.sha256(content_bytes).hexdigest()
+                files.append(GeneratedWebsiteFile(
+                    path=rel_path,
+                    content=content,
+                    file_type=ext,
+                    checksum=checksum,
+                    size_bytes=len(content_bytes),
+                ))
+
+        routes = manifest.get("routes", []) if manifest else ["/"]
+        components = manifest.get("components", []) if manifest else []
+        entrypoints = manifest.get("entrypoints", []) if manifest else ["app/page.tsx", "app/layout.tsx"]
+
+        return GeneratedWebsiteProject(
+            framework=manifest.get("framework", "nextjs") if manifest else "nextjs",
+            language=manifest.get("language", "typescript") if manifest else "typescript",
+            package_manager=manifest.get("package_manager", "npm") if manifest else "npm",
+            files=files,
+            entrypoints=entrypoints,
+            routes=routes,
+            components=components,
+            assets=manifest.get("assets", []) if manifest else [],
+            metadata=manifest.get("metadata", {}) if manifest else {},
+        )

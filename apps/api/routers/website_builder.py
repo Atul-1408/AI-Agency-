@@ -89,6 +89,38 @@ from services.code_generation_service import (
     CodeGenerationValidationFailureError,
     WebsiteCodeGenerationService,
 )
+from fastapi.responses import HTMLResponse
+from schemas.website_preview_edit import (
+    WebsiteEditCancelRequest,
+    WebsiteEditCreateRequest,
+    WebsiteEditDetailResponse,
+    WebsiteEditListResponse,
+    WebsiteEditResponse,
+    WebsiteEditVersionResponse,
+    WebsitePreviewCreateRequest,
+    WebsitePreviewListResponse,
+    WebsitePreviewResponse,
+    WebsitePreviewStatusResponse,
+    WebsiteVersionListResponse,
+    WebsiteVersionRollbackResponse,
+)
+from services.website_preview_service import (
+    PreviewError,
+    PreviewIneligibleError,
+    PreviewNotFoundError,
+    PreviewOwnershipError,
+    WebsitePreviewService,
+)
+from services.website_editing_service import (
+    ConcurrentEditConflictError,
+    EditError,
+    EditIneligibleError,
+    EditNotFoundError,
+    EditOwnershipError,
+    EditValidationFailureError,
+    StaleBaseVersionConflictError,
+    WebsiteEditingService,
+)
 
 router = APIRouter()
 
@@ -1128,4 +1160,513 @@ async def get_code_generation_files(
     except CodeGenerationNotFoundError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except CodeGenerationOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+# ── Phase 6.5 Serializers ─────────────────────────────────────────────────────
+
+def _serialize_preview(preview: Any) -> WebsitePreviewResponse:
+    return WebsitePreviewResponse(
+        id=preview.id,
+        project_id=preview.project_id,
+        build_session_id=preview.build_session_id,
+        code_generation_id=preview.code_generation_id,
+        version=preview.current_version,
+        status=preview.status.value,
+        preview_token=preview.preview_token,
+        preview_url=f"/api/v1/previews/{preview.id}/render",
+        port=preview.port,
+        workspace_reference=preview.workspace_reference,
+        started_at=preview.started_at,
+        stopped_at=preview.stopped_at,
+        expires_at=preview.expires_at,
+        last_error=preview.last_error,
+        metadata=preview.preview_metadata,
+        created_at=preview.created_at,
+    )
+
+
+def _serialize_edit(edit: Any) -> WebsiteEditResponse:
+    return WebsiteEditResponse(
+        id=edit.id,
+        project_id=edit.project_id,
+        preview_id=edit.preview_id,
+        base_code_generation_id=edit.base_code_generation_id,
+        base_version=edit.base_version,
+        status=edit.status.value,
+        owner_request=edit.owner_request,
+        error_code=edit.error_code,
+        error_message=edit.error_message,
+        started_at=edit.started_at,
+        completed_at=edit.completed_at,
+        metadata=edit.edit_metadata,
+        created_at=edit.created_at,
+    )
+
+
+def _serialize_version(ver: Any) -> WebsiteEditVersionResponse:
+    return WebsiteEditVersionResponse(
+        id=ver.id,
+        project_id=ver.project_id,
+        edit_session_id=ver.edit_session_id,
+        source_generation_id=ver.source_generation_id,
+        parent_version=ver.parent_version,
+        version=ver.version,
+        changed_files=ver.changed_files,
+        diff_summary=ver.diff_summary,
+        source_checksum=ver.source_checksum,
+        artifact_id=ver.artifact_id,
+        is_active=ver.is_active,
+        metadata=ver.version_metadata,
+        created_at=ver.created_at,
+    )
+
+
+# ── Phase 6.5 Preview Endpoints ───────────────────────────────────────────────
+
+@router.post(
+    "/projects/{project_id}/previews",
+    response_model=WebsitePreviewResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an isolated live website preview instance",
+)
+async def create_preview(
+    project_id: uuid.UUID,
+    payload: WebsitePreviewCreateRequest = WebsitePreviewCreateRequest(),
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewResponse:
+    """Creates an isolated preview instance for a completed code generation."""
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.create_preview(
+            db=db,
+            project_id=project_id,
+            owner_id=owner_email,
+            code_generation_id=payload.code_generation_id,
+        )
+        return _serialize_preview(preview)
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except PreviewIneligibleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/previews",
+    response_model=WebsitePreviewListResponse,
+    summary="List all preview instances for a project",
+)
+async def list_previews(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewListResponse:
+    """Lists preview instances belonging to the given project."""
+    verify_owner_access(owner_email)
+    try:
+        previews = await WebsitePreviewService.list_previews_for_project(
+            db=db,
+            project_id=project_id,
+            owner_id=owner_email,
+        )
+        return WebsitePreviewListResponse(
+            previews=[_serialize_preview(p) for p in previews],
+            total_count=len(previews),
+        )
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/previews/{preview_id}",
+    response_model=WebsitePreviewResponse,
+    summary="Retrieve details for a preview instance",
+)
+async def get_preview(
+    preview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewResponse:
+    """Retrieves a preview instance by ID."""
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.get_preview(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+        return _serialize_preview(preview)
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post(
+    "/previews/{preview_id}/start",
+    response_model=WebsitePreviewResponse,
+    summary="Start an isolated preview server",
+)
+async def start_preview(
+    preview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewResponse:
+    """Starts a preview instance and initializes its TTL."""
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.start_preview(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+        return _serialize_preview(preview)
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post(
+    "/previews/{preview_id}/stop",
+    response_model=WebsitePreviewResponse,
+    summary="Stop an isolated preview server",
+)
+async def stop_preview(
+    preview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewResponse:
+    """Stops an active preview instance."""
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.stop_preview(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+        return _serialize_preview(preview)
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post(
+    "/previews/{preview_id}/restart",
+    response_model=WebsitePreviewResponse,
+    summary="Restart an isolated preview server",
+)
+async def restart_preview(
+    preview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewResponse:
+    """Restarts a preview instance and resets runtime timers."""
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.restart_preview(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+        return _serialize_preview(preview)
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/previews/{preview_id}/status",
+    response_model=WebsitePreviewStatusResponse,
+    summary="Get real-time operational status for a preview instance",
+)
+async def get_preview_status(
+    preview_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsitePreviewStatusResponse:
+    """Calculates runtime uptime and returns status."""
+    verify_owner_access(owner_email)
+    try:
+        return await WebsitePreviewService.get_preview_status(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/previews/{preview_id}/render",
+    response_class=HTMLResponse,
+    summary="Render isolated preview HTML safely in a container/iframe",
+)
+async def render_preview(
+    preview_id: uuid.UUID,
+    token: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> HTMLResponse:
+    """
+    Renders the sandboxed website preview HTML.
+    Enforces owner authorization and strict Content-Security-Policy headers.
+    """
+    verify_owner_access(owner_email)
+    try:
+        preview = await WebsitePreviewService.get_preview(
+            db=db,
+            preview_id=preview_id,
+            owner_id=owner_email,
+        )
+        html_body = WebsitePreviewService.render_preview_html(preview)
+        response = HTMLResponse(content=html_body, status_code=200)
+        # Strict frame ancestor and content security policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' data:; frame-ancestors 'self' http://localhost:3000 http://localhost:3001;"
+        )
+        response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return response
+    except PreviewNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PreviewOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+# ── Phase 6.5 Iterative Editing Endpoints ─────────────────────────────────────
+
+@router.post(
+    "/projects/{project_id}/edits",
+    response_model=WebsiteEditDetailResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Initiate and apply an AI-assisted iterative edit to the website",
+)
+async def create_edit(
+    project_id: uuid.UUID,
+    payload: WebsiteEditCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditDetailResponse:
+    """Executes a targeted, minimal iterative edit against the active website version."""
+    verify_owner_access(owner_email)
+    try:
+        session, version = await WebsiteEditingService.initiate_and_apply_edit(
+            db=db,
+            project_id=project_id,
+            owner_id=owner_email,
+            request_payload=payload,
+        )
+        return WebsiteEditDetailResponse(
+            edit=_serialize_edit(session),
+            changed_files=version.changed_files,
+            diff_summary=version.diff_summary,
+            version_created=version.version,
+            new_version_id=version.id,
+        )
+    except EditNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except EditOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except StaleBaseVersionConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except ConcurrentEditConflictError as e:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except EditValidationFailureError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
+    except EditIneligibleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.get(
+    "/projects/{project_id}/edits",
+    response_model=WebsiteEditListResponse,
+    summary="List all edit sessions for a project",
+)
+async def list_edits(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditListResponse:
+    """Lists iterative edit sessions belonging to the project."""
+    verify_owner_access(owner_email)
+    try:
+        edits = await WebsiteEditingService.list_edits_for_project(
+            db=db,
+            project_id=project_id,
+            owner_id=owner_email,
+        )
+        return WebsiteEditListResponse(
+            edits=[_serialize_edit(e) for e in edits],
+            total_count=len(edits),
+        )
+    except EditNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except EditOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/edits/{edit_id}",
+    response_model=WebsiteEditDetailResponse,
+    summary="Retrieve details for an edit session",
+)
+async def get_edit(
+    edit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditDetailResponse:
+    """Retrieves an edit session by ID."""
+    verify_owner_access(owner_email)
+    edit = await db.get(WebsiteEditSession, edit_id)
+    if not edit:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Edit session '{edit_id}' not found.")
+    if edit.owner_id != owner_email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized access to edit session.")
+
+    return WebsiteEditDetailResponse(
+        edit=_serialize_edit(edit),
+        changed_files=edit.edit_metadata.get("changed_files", []),
+        diff_summary=edit.edit_metadata.get("diff_summary"),
+        version_created=edit.edit_metadata.get("version_created"),
+        new_version_id=uuid.UUID(edit.edit_metadata["version_id"]) if edit.edit_metadata.get("version_id") else None,
+    )
+
+
+@router.post(
+    "/edits/{edit_id}/cancel",
+    response_model=WebsiteEditResponse,
+    summary="Cancel an active edit session",
+)
+async def cancel_edit(
+    edit_id: uuid.UUID,
+    payload: WebsiteEditCancelRequest = WebsiteEditCancelRequest(),
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditResponse:
+    """Cancels an active or pending edit session."""
+    verify_owner_access(owner_email)
+    try:
+        edit = await WebsiteEditingService.cancel_edit(
+            db=db,
+            edit_id=edit_id,
+            owner_id=owner_email,
+            reason=payload.reason,
+        )
+        return _serialize_edit(edit)
+    except EditNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except EditOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except EditIneligibleError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+
+@router.post(
+    "/edits/{edit_id}/apply",
+    response_model=WebsiteEditDetailResponse,
+    summary="Confirm or re-apply an edit session",
+)
+async def apply_edit(
+    edit_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditDetailResponse:
+    """Returns applied edit detail."""
+    return await get_edit(edit_id=edit_id, db=db, owner_email=owner_email)
+
+
+# ── Phase 6.5 Versioning & Rollback Endpoints ─────────────────────────────────
+
+@router.get(
+    "/projects/{project_id}/versions",
+    response_model=WebsiteVersionListResponse,
+    summary="List all immutable website versions for a project",
+)
+async def list_versions(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteVersionListResponse:
+    """Lists all version records and identifies the currently active version."""
+    verify_owner_access(owner_email)
+    try:
+        versions = await WebsiteEditingService.list_versions_for_project(
+            db=db,
+            project_id=project_id,
+            owner_id=owner_email,
+        )
+        active_ver = await WebsiteEditingService.get_active_version(db, project_id)
+        current_version_num = active_ver.version if active_ver else (versions[0].version if versions else 1)
+
+        return WebsiteVersionListResponse(
+            versions=[_serialize_version(v) for v in versions],
+            current_version=current_version_num,
+            total_count=len(versions),
+        )
+    except EditNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except EditOwnershipError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.get(
+    "/versions/{version_id}",
+    response_model=WebsiteEditVersionResponse,
+    summary="Retrieve details for a specific website version",
+)
+async def get_version(
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteEditVersionResponse:
+    """Retrieves an immutable version record by ID."""
+    verify_owner_access(owner_email)
+    ver = await db.get(WebsiteEditVersion, version_id)
+    if not ver:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Version '{version_id}' not found.")
+    if ver.owner_id != owner_email:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Unauthorized access to version.")
+    return _serialize_version(ver)
+
+
+@router.post(
+    "/versions/{version_id}/rollback",
+    response_model=WebsiteVersionRollbackResponse,
+    summary="Execute a non-destructive rollback to a previous version",
+)
+async def rollback_version(
+    version_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    owner_email: str = Depends(require_owner),
+) -> WebsiteVersionRollbackResponse:
+    """
+    Rolls back the active website codebase to the target version.
+    Crucial: Creates a new sequential version without altering or deleting prior history.
+    """
+    verify_owner_access(owner_email)
+    try:
+        target_ver, new_ver, record = await WebsiteEditingService.rollback_to_version(
+            db=db,
+            version_id=version_id,
+            owner_id=owner_email,
+        )
+        return WebsiteVersionRollbackResponse(
+            message=f"Successfully rolled back to version v{target_ver}. New active release is v{new_ver}.",
+            rolled_back_to_version=target_ver,
+            new_version=new_ver,
+            version_record=_serialize_version(record),
+        )
+    except EditNotFoundError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except EditOwnershipError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
