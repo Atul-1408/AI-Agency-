@@ -65,8 +65,9 @@ async def run_website_builder_agent(ctx: dict, run_id: str, input_data: dict) ->
 
 
 async def run_qa_agent(ctx: dict, run_id: str, input_data: dict) -> dict:
-    """Phase 7: Not yet implemented."""
-    return {"status": "not_implemented", "phase": 7}
+    """Phase 7: Active. Calls QAAgent().run()."""
+    from agents.qa_agent import QAAgent
+    return await QAAgent().run(run_id, input_data)
 
 
 async def run_deployment_agent(ctx: dict, run_id: str, input_data: dict) -> dict:

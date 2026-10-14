@@ -344,6 +344,16 @@ from models.website_builder import (
     WebsiteEditVersion,
 )
 
+# ── Phase 7 Models ────────────────────────────────────────────────────────────
+
+from models.website_qa import (
+    WebsiteQARun,
+    WebsiteQARunStatus,
+    WebsiteQAFinding,
+    QAFindingSeverity,
+    QAFindingCategory,
+)
+
 __all__ = [
     # Mixins
     "TimestampMixin",
@@ -420,4 +430,10 @@ __all__ = [
     "WebsiteEditSession",
     "WebsiteEditSessionStatus",
     "WebsiteEditVersion",
+    # Phase 7
+    "WebsiteQARun",
+    "WebsiteQARunStatus",
+    "WebsiteQAFinding",
+    "QAFindingSeverity",
+    "QAFindingCategory",
 ]

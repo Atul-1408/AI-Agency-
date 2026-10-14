@@ -636,6 +636,42 @@ export const api = {
         }
       ),
   },
+  // Phase 7 Automated QA & Evaluator
+  qa: {
+    triggerRun: (
+      projectId: string,
+      payload?: { code_generation_id?: string; target_version?: number }
+    ) =>
+      apiFetch<WebsiteQARunDetail>(`/api/v1/projects/${projectId}/qa-runs`, {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      }),
+    listRuns: (projectId: string) =>
+      apiFetch<WebsiteQARunListResponse>(`/api/v1/projects/${projectId}/qa-runs`),
+    getRun: (runId: string) =>
+      apiFetch<WebsiteQARunDetail>(`/api/v1/qa-runs/${runId}`),
+    listFindings: (
+      runId: string,
+      params?: { severity?: string; category?: string; is_repaired?: boolean }
+    ) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {})
+          .filter(([, v]) => v !== undefined && v !== "all" && v !== "")
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return apiFetch<WebsiteQAFindingListResponse>(
+        `/api/v1/qa-runs/${runId}/findings${qs ? `?${qs}` : ""}`
+      );
+    },
+    repairFinding: (
+      findingId: string,
+      payload?: { additional_instructions?: string }
+    ) =>
+      apiFetch<QARepairResponse>(`/api/v1/qa-findings/${findingId}/repair`, {
+        method: "POST",
+        body: JSON.stringify(payload ?? {}),
+      }),
+  },
 };
 
 
@@ -1395,3 +1431,95 @@ export interface WebsiteVersionRollbackResponse {
   new_version: number;
   version_record: WebsiteEditVersion;
 }
+
+// ── Phase 7 Automated QA & Evaluator Types ───────────────────────────────────
+
+export type QAFindingSeverity = "blocker" | "high" | "medium" | "low" | "info";
+export type QAFindingCategory =
+  | "build_integrity"
+  | "routing_navigation"
+  | "broken_links_assets"
+  | "responsive_overflow"
+  | "accessibility_wcag"
+  | "seo_metadata"
+  | "security_secrets"
+  | "performance_simulation";
+
+export type WebsiteQARunStatus =
+  | "ready_for_qa"
+  | "running"
+  | "passed"
+  | "passed_with_warnings"
+  | "failed";
+
+export interface WebsiteQAFinding {
+  id: string;
+  qa_run_id: string;
+  project_id: string;
+  code_generation_id: string;
+  severity: QAFindingSeverity;
+  category: QAFindingCategory;
+  title: string;
+  description: string;
+  affected_route?: string | null;
+  affected_file?: string | null;
+  line_number?: number | null;
+  evidence: Record<string, unknown>;
+  remediation_recommendation: string;
+  is_repaired: boolean;
+  repaired_in_version?: number | null;
+  repair_diff_summary?: string | null;
+  created_at: string;
+  repaired_at?: string | null;
+}
+
+export interface WebsiteQARun {
+  id: string;
+  project_id: string;
+  build_session_id: string;
+  code_generation_id: string;
+  source_version: number;
+  status: WebsiteQARunStatus;
+  overall_score: number;
+  blocker_count: number;
+  high_count: number;
+  medium_count: number;
+  low_count: number;
+  info_count: number;
+  total_checks_run: number;
+  total_checks_passed: number;
+  total_checks_failed: number;
+  total_checks_skipped: number;
+  skipped_checks_reasons: Record<string, string>;
+  check_breakdown: Record<string, unknown>;
+  lighthouse_simulation: Record<string, unknown>;
+  started_at?: string | null;
+  completed_at?: string | null;
+  error_message?: string | null;
+  created_at: string;
+}
+
+export interface WebsiteQARunDetail {
+  qa_run: WebsiteQARun;
+  findings: WebsiteQAFinding[];
+}
+
+export interface WebsiteQARunListResponse {
+  qa_runs: WebsiteQARun[];
+  total_count: number;
+}
+
+export interface WebsiteQAFindingListResponse {
+  findings: WebsiteQAFinding[];
+  total_count: number;
+}
+
+export interface QARepairResponse {
+  message: string;
+  finding_id: string;
+  is_repaired: boolean;
+  new_version: number;
+  diff_summary: string;
+  changed_files: string[];
+}
+

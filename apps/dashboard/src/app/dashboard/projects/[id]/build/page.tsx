@@ -21,6 +21,10 @@ import {
   type WebsiteEdit,
   type WebsiteEditDetail,
   type WebsiteEditVersion,
+  type WebsiteQARun,
+  type WebsiteQAFinding,
+  type WebsiteQARunDetail,
+  type QAFindingSeverity,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -33,6 +37,10 @@ import {
   FileText,
   CheckCircle2,
   XCircle,
+  Bug,
+  Wrench,
+  CheckCheck,
+  FileCheck,
   PauseCircle,
   PlayCircle,
   History,
@@ -115,6 +123,13 @@ export default function WebsiteBuildWorkspacePage({
   const [editPrompt, setEditPrompt] = useState<string>("");
   const [editLoading, setEditLoading] = useState<boolean>(false);
   const [rollbackLoading, setRollbackLoading] = useState<boolean>(false);
+
+  // Phase 7 Automated QA & Evaluator State
+  const [qaRuns, setQaRuns] = useState<WebsiteQARun[]>([]);
+  const [selectedQARun, setSelectedQARun] = useState<WebsiteQARunDetail | null>(null);
+  const [qaLoading, setQaLoading] = useState<boolean>(false);
+  const [repairingFindingId, setRepairingFindingId] = useState<string | null>(null);
+  const [severityFilter, setSeverityFilter] = useState<"all" | QAFindingSeverity>("all");
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -199,6 +214,22 @@ export default function WebsiteBuildWorkspacePage({
     }
   }, []);
 
+  const loadQARuns = useCallback(async (projId: string) => {
+    try {
+      const runsList = await api.qa.listRuns(projId);
+      setQaRuns(runsList.qa_runs);
+      if (runsList.qa_runs.length > 0) {
+        const topRunDetail = await api.qa.getRun(runsList.qa_runs[0].id);
+        setSelectedQARun(topRunDetail);
+      } else {
+        setSelectedQARun(null);
+      }
+    } catch {
+      setQaRuns([]);
+      setSelectedQARun(null);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -212,6 +243,7 @@ export default function WebsiteBuildWorkspacePage({
 
       // Load Previews, Edits, and Versions for project
       await loadPreviewsAndVersions(projectId);
+      await loadQARuns(projectId);
 
       // Find current active session or most recent session
       const active = sessionListData.items.find((s) =>
@@ -557,6 +589,63 @@ export default function WebsiteBuildWorkspacePage({
       setError(err instanceof Error ? err.message : "Failed to rollback version.");
     } finally {
       setRollbackLoading(false);
+    }
+  };
+
+  // Phase 7 QA Handlers
+  const handleTriggerQA = async () => {
+    if (!project) return;
+    try {
+      setQaLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const targetCodeGenId = selectedCodeGen?.id;
+      const res = await api.qa.triggerRun(projectId, {
+        code_generation_id: targetCodeGenId,
+      });
+      setSelectedQARun(res);
+      await loadQARuns(projectId);
+      const updatedProj = await api.projects.get(projectId);
+      setProject(updatedProj);
+      setSuccessMessage(
+        `QA Audit completed: ${res.qa_run.status.toUpperCase()} (${res.qa_run.overall_score}/100) — ${res.qa_run.total_checks_passed}/${res.qa_run.total_checks_run} checks passed.`
+      );
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to execute automated QA.");
+    } finally {
+      setQaLoading(false);
+    }
+  };
+
+  const handleRepairFinding = async (findingId: string) => {
+    try {
+      setRepairingFindingId(findingId);
+      setError(null);
+      setSuccessMessage(null);
+      const res = await api.qa.repairFinding(findingId);
+      setSuccessMessage(`Defect repaired in v${res.new_version}: ${res.diff_summary || res.message}`);
+      setPreviewKey((k) => k + 1);
+      if (selectedQARun) {
+        const refreshed = await api.qa.getRun(selectedQARun.qa_run.id);
+        setSelectedQARun(refreshed);
+      }
+      await loadPreviewsAndVersions(projectId);
+      if (activeSession) {
+        await loadCodeGensForSession(activeSession.id);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to apply automated repair.");
+    } finally {
+      setRepairingFindingId(null);
+    }
+  };
+
+  const handleSelectQARun = async (runId: string) => {
+    try {
+      const detail = await api.qa.getRun(runId);
+      setSelectedQARun(detail);
+    } catch {
+      // Ignore
     }
   };
 
@@ -2082,11 +2171,340 @@ export default function WebsiteBuildWorkspacePage({
               </div>
             )}
           </div>
+
+          {/* Phase 7: Automated QA & Evaluator Engine Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-[#E8B968]/30 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#242126] pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-[#E8B968] uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[#E8B968]" />
+                    Phase 7 Automated QA & Evaluator Engine
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-[#E8B968]/15 border border-[#E8B968]/30 text-[#E8B968]">
+                    Active
+                  </span>
+                </div>
+                <h2 className="text-lg font-bold text-[#F5F1EA] mt-1 flex items-center gap-3">
+                  <span>Website Quality & Standards Audit</span>
+                  {selectedQARun && (
+                    <span
+                      className={`text-xs px-2.5 py-0.5 rounded-full font-bold uppercase ${
+                        selectedQARun.qa_run.status === "passed"
+                          ? "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30"
+                          : selectedQARun.qa_run.status === "passed_with_warnings"
+                          ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                          : selectedQARun.qa_run.status === "failed"
+                          ? "bg-red-500/20 text-red-400 border border-red-500/30"
+                          : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                      }`}
+                    >
+                      {selectedQARun.qa_run.status.replace(/_/g, " ")}
+                    </span>
+                  )}
+                </h2>
+                <p className="text-xs text-[#77717C] mt-0.5">
+                  Automated browser checks, WCAG 2.1 accessibility, responsive viewports, SEO, broken links, & AI repair loop.
+                </p>
+              </div>
+
+              {/* QA Run Trigger Action */}
+              <div className="flex items-center gap-3">
+                {selectedQARun && (
+                  <div className="px-3 py-1.5 rounded-xl bg-[#1B191E] border border-[#242126] text-right">
+                    <span className="text-[10px] text-[#77717C] uppercase block">Audit Score</span>
+                    <span
+                      className={`text-base font-extrabold ${
+                        selectedQARun.qa_run.overall_score >= 80
+                          ? "text-emerald-400"
+                          : selectedQARun.qa_run.overall_score >= 60
+                          ? "text-amber-400"
+                          : "text-red-400"
+                      }`}
+                    >
+                      {selectedQARun.qa_run.overall_score} / 100
+                    </span>
+                  </div>
+                )}
+                <button
+                  onClick={handleTriggerQA}
+                  disabled={qaLoading || !selectedCodeGen}
+                  className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-[#E8B968] hover:bg-[#F5CC7A] text-[#141216] text-xs font-bold transition-all shadow-lg shadow-[#E8B968]/10 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {qaLoading ? (
+                    <>
+                      <RotateCw className="w-4 h-4 animate-spin" />
+                      <span>Auditing Quality...</span>
+                    </>
+                  ) : (
+                    <>
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>{selectedQARun ? "Re-run QA Audit" : "Run Automated QA"}</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* QA Content */}
+            {selectedQARun ? (
+              <div className="space-y-6">
+                {/* 8-Point Audit Categories Overview */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  {[
+                    { label: "Build Integrity", key: "build_integrity" },
+                    { label: "Routing & Nav", key: "routing_navigation" },
+                    { label: "Links & Assets", key: "broken_links_assets" },
+                    { label: "Responsive Views", key: "responsive_overflow" },
+                    { label: "WCAG 2.1 A11y", key: "accessibility_wcag" },
+                    { label: "SEO & Metas", key: "seo_metadata" },
+                    { label: "Security & Secrets", key: "security_secrets" },
+                    { label: "Performance", key: "performance_simulation" },
+                  ].map((cat) => {
+                    const findingsInCat = selectedQARun.findings.filter(
+                      (f) => f.category === cat.key && !f.is_repaired
+                    );
+                    const hasBlocker = findingsInCat.some((f) => f.severity === "blocker" || f.severity === "high");
+                    const hasWarn = findingsInCat.some((f) => f.severity === "medium" || f.severity === "low");
+                    return (
+                      <div
+                        key={cat.key}
+                        className={`p-2.5 rounded-xl border text-xs flex items-center justify-between ${
+                          hasBlocker
+                            ? "bg-red-500/10 border-red-500/30 text-red-300"
+                            : hasWarn
+                            ? "bg-amber-500/10 border-amber-500/30 text-amber-300"
+                            : "bg-[#1B191E] border-[#242126] text-[#A9A4AE]"
+                        }`}
+                      >
+                        <span className="truncate">{cat.label}</span>
+                        {hasBlocker ? (
+                          <XCircle className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />
+                        ) : hasWarn ? (
+                          <AlertTriangle className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                        ) : (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 flex-shrink-0" />
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Defect Counts by Severity */}
+                <div className="flex flex-wrap items-center gap-2 p-3 rounded-xl bg-[#1B191E] border border-[#242126] text-xs">
+                  <span className="text-[#77717C] text-[11px] uppercase font-semibold mr-1">
+                    Findings:
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-red-500/20 text-red-400 font-mono font-bold">
+                    {selectedQARun.qa_run.blocker_count} Blocker
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-orange-500/20 text-orange-400 font-mono font-bold">
+                    {selectedQARun.qa_run.high_count} High
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 font-mono font-bold">
+                    {selectedQARun.qa_run.medium_count} Medium
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-blue-500/20 text-blue-400 font-mono font-bold">
+                    {selectedQARun.qa_run.low_count} Low
+                  </span>
+                  <span className="px-2 py-0.5 rounded bg-[#242126] text-[#77717C] font-mono">
+                    {selectedQARun.qa_run.info_count} Info
+                  </span>
+                  <span className="ml-auto text-[11px] text-[#77717C]">
+                    Tested Source Version: <strong className="text-[#F5F1EA]">v{selectedQARun.qa_run.source_version}</strong>
+                  </span>
+                </div>
+
+                {/* Filter & Findings List */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between border-b border-[#242126] pb-2 text-xs">
+                    <span className="font-semibold text-[#F5F1EA]">
+                      Audit Findings ({selectedQARun.findings.length})
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      {(["all", "blocker", "high", "medium", "low", "info"] as const).map((sev) => (
+                        <button
+                          key={sev}
+                          onClick={() => setSeverityFilter(sev)}
+                          className={`px-2 py-0.5 rounded text-[11px] capitalize transition-colors ${
+                            severityFilter === sev
+                              ? "bg-[#E8B968] text-[#141216] font-bold"
+                              : "text-[#77717C] hover:text-[#F5F1EA] hover:bg-[#1B191E]"
+                          }`}
+                        >
+                          {sev}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {selectedQARun.findings.filter(
+                    (f) => severityFilter === "all" || f.severity === severityFilter
+                  ).length > 0 ? (
+                    <div className="space-y-2.5 max-h-[480px] overflow-y-auto pr-1">
+                      {selectedQARun.findings
+                        .filter((f) => severityFilter === "all" || f.severity === severityFilter)
+                        .map((finding) => (
+                          <div
+                            key={finding.id}
+                            className={`p-4 rounded-xl border text-xs space-y-2.5 transition-all ${
+                              finding.is_repaired
+                                ? "bg-[#1B191E]/40 border-emerald-500/30 opacity-75"
+                                : finding.severity === "blocker"
+                                ? "bg-red-950/20 border-red-500/40"
+                                : finding.severity === "high"
+                                ? "bg-orange-950/20 border-orange-500/40"
+                                : finding.severity === "medium"
+                                ? "bg-amber-950/20 border-amber-500/30"
+                                : "bg-[#1B191E] border-[#242126]"
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase font-mono ${
+                                      finding.severity === "blocker"
+                                        ? "bg-red-500 text-white"
+                                        : finding.severity === "high"
+                                        ? "bg-orange-500 text-white"
+                                        : finding.severity === "medium"
+                                        ? "bg-amber-500/20 text-amber-400 border border-amber-500/30"
+                                        : "bg-blue-500/20 text-blue-400 border border-blue-500/30"
+                                    }`}
+                                  >
+                                    {finding.severity}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-[#77717C] bg-[#242126] px-1.5 py-0.5 rounded">
+                                    {finding.category.replace(/_/g, " ")}
+                                  </span>
+                                  {finding.affected_route && (
+                                    <span className="text-[10px] text-cyan-300 font-mono">
+                                      {finding.affected_route}
+                                    </span>
+                                  )}
+                                </div>
+                                <h4 className="font-bold text-[#F5F1EA] text-[13px]">{finding.title}</h4>
+                              </div>
+
+                              {/* Repair Status or Action */}
+                              <div>
+                                {finding.is_repaired ? (
+                                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-semibold text-[11px]">
+                                    <CheckCheck className="w-3.5 h-3.5" />
+                                    Repaired in v{finding.repaired_in_version}
+                                  </span>
+                                ) : (
+                                  <button
+                                    onClick={() => handleRepairFinding(finding.id)}
+                                    disabled={repairingFindingId === finding.id}
+                                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/40 text-purple-200 font-semibold text-[11px] transition-colors disabled:opacity-50"
+                                  >
+                                    {repairingFindingId === finding.id ? (
+                                      <>
+                                        <RotateCw className="w-3 h-3 animate-spin" />
+                                        Repairing...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Wrench className="w-3 h-3" />
+                                        Auto-Repair
+                                      </>
+                                    )}
+                                  </button>
+                                )}
+                              </div>
+                            </div>
+
+                            <p className="text-[#A9A4AE] leading-relaxed">{finding.description}</p>
+
+                            <div className="p-2.5 rounded-lg bg-[#111013] border border-[#242126] space-y-1">
+                              <span className="text-[10px] uppercase font-semibold text-[#E8B968] block">
+                                Recommended Remediation:
+                              </span>
+                              <p className="text-[11px] text-[#B7AFBA] font-mono">
+                                {finding.remediation_recommendation}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="p-6 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                      No findings match the selected severity filter.
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 rounded-xl bg-[#1B191E] border border-[#242126] text-center space-y-3">
+                <ShieldCheck className="w-10 h-10 text-[#E8B968] mx-auto opacity-70" />
+                <h3 className="text-sm font-semibold text-[#F5F1EA]">
+                  Autonomous Quality Audit Ready
+                </h3>
+                <p className="text-xs text-[#77717C] max-w-md mx-auto leading-relaxed">
+                  Click &ldquo;Run Automated QA&rdquo; to execute deterministic static and synthetic browser checks across routing, accessibility, SEO, responsive viewports, and security.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
 
         {/* Right Column: Generation History, Blueprint History & Session Baseline */}
         <div className="space-y-6">
+          {/* Phase 7 QA History Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-[#E8B968]/30 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-[#E8B968] uppercase tracking-wider">
+                QA Audit History ({qaRuns.length})
+              </span>
+              <ShieldCheck className="w-4 h-4 text-[#E8B968]" />
+            </div>
+
+            {qaRuns.length > 0 ? (
+              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                {qaRuns.map((r) => {
+                  const isSelected = selectedQARun?.qa_run.id === r.id;
+                  return (
+                    <button
+                      key={r.id}
+                      onClick={() => handleSelectQARun(r.id)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all text-xs ${
+                        isSelected
+                          ? "bg-[#1B191E] border-[#E8B968]"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-[#E8B968]/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#F5F1EA]">v{r.source_version} Audit</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            r.status === "passed"
+                              ? "bg-emerald-500/20 text-emerald-400"
+                              : r.status === "passed_with_warnings"
+                              ? "bg-amber-500/20 text-amber-400"
+                              : "bg-red-500/20 text-red-400"
+                          }`}
+                        >
+                          {r.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-2 text-[10px] text-[#77717C]">
+                        <span>{new Date(r.created_at).toLocaleDateString()}</span>
+                        <span className="font-bold text-[#E8B968] font-mono">Score: {r.overall_score}/100</span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No QA audits executed yet.
+              </div>
+            )}
+          </div>
+
           {/* Code Generation History Card (Phase 6.4) */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-emerald-500/30 space-y-4">
             <div className="flex items-center justify-between border-b border-[#242126] pb-3">
