@@ -2207,7 +2207,11 @@ export default function WebsiteBuildWorkspacePage({
                     >
                       <iframe
                         key={previewKey}
-                        src={`/api/v1/previews/${activePreview.id}/render`}
+                        src={
+                          activePreview.preview_token
+                            ? `/api/v1/previews/${activePreview.id}/render?token=${encodeURIComponent(activePreview.preview_token)}`
+                            : `/api/v1/previews/${activePreview.id}/render`
+                        }
                         className="w-full h-full border-0"
                         sandbox="allow-scripts allow-same-origin"
                         title={`Live Preview v${activePreview.version}`}

@@ -124,6 +124,39 @@ export interface HealthResponse {
   services: Record<string, HealthService>;
 }
 
+export type IntegrationClassification =
+  | "REAL_AND_VERIFIED"
+  | "IMPLEMENTED_BUT_MOCKED"
+  | "CONFIGURATION_MISSING"
+  | "PARTIALLY_INTEGRATED"
+  | "FAILING"
+  | "NOT_APPLICABLE";
+
+export interface SystemReadinessComponent {
+  classification: IntegrationClassification;
+  configured?: boolean;
+  connected?: boolean;
+  provider?: string;
+  dialect?: string;
+  table_count?: number;
+  engine_type?: string;
+  details?: string;
+  authenticated_user?: string;
+  connected_accounts?: number;
+  path?: string;
+  writable?: boolean;
+  stages?: number;
+  human_gates?: number;
+}
+
+export interface SystemReadinessResponse {
+  timestamp: string;
+  environment: string;
+  overall_status: "production_ready" | "operational_simulation" | "degraded";
+  classifications_summary: Record<string, number>;
+  components: Record<string, SystemReadinessComponent>;
+}
+
 export interface AgentRun {
   id: string;
   agent_name: string;
@@ -223,22 +256,25 @@ async function apiFetch<T>(
 // ── API Service ───────────────────────────────────────────────────────────────
 
 export const api = {
-  // System Health
+  // System Health & Readiness (Phase 10)
   health: async (): Promise<HealthResponse> => {
     try {
       return await apiFetch<HealthResponse>("/api/v1/health", {}, false);
     } catch {
       return {
-        status: "ok",
-        version: "0.2.0-phase2",
-        environment: "development",
+        status: "degraded",
+        version: "0.1.0",
+        environment: "offline",
         services: {
-          database: { status: "ok", detail: "PostgreSQL active" },
-          redis: { status: "ok", detail: "Redis broker responsive" },
-          arq_worker: { status: "ok", detail: "Lead Research worker listening" },
+          database: { status: "unavailable", detail: "Backend offline or unreachable" },
+          redis: { status: "unavailable", detail: "Backend offline or unreachable" },
         },
       };
     }
+  },
+
+  systemReadiness: async (): Promise<SystemReadinessResponse> => {
+    return await apiFetch<SystemReadinessResponse>("/api/v1/system/readiness", {}, false);
   },
 
   // Auth
@@ -1816,13 +1852,15 @@ export interface WorkflowListResponse {
 }
 
 export interface ProviderConnectivityResponse {
-  database: { connected: boolean; provider: string; latency_ms?: number; detail?: string };
-  redis_queue: { connected: boolean; url: string; detail: string; pending_jobs?: number };
-  ai_provider: { connected: boolean; provider: string; model: string; detail: string };
-  gmail: { connected: boolean; email?: string; scopes?: string[]; token_valid?: boolean; detail: string };
-  github: { configured: boolean; target_owner?: string; token_present: boolean; detail: string };
-  vercel: { configured: boolean; team_id?: string; token_present: boolean; detail: string };
-  summary: { total_configured: number; total_live: number; all_critical_live: boolean };
+  database: { connected: boolean; provider?: string; dialect?: string; latency_ms?: number; detail?: string; details?: string };
+  redis_queue: { connected: boolean; configured?: boolean; url?: string; detail?: string; details?: string; pending_jobs?: number };
+  ai_provider: { connected?: boolean; configured?: boolean; provider?: string; model?: string; detail?: string; details?: string };
+  google_places?: { configured?: boolean; provider?: string; details?: string };
+  gmail: { connected?: boolean; configured?: boolean; email?: string; scopes?: string[]; token_valid?: boolean; detail?: string; details?: string };
+  github: { configured: boolean; target_owner?: string; token_present?: boolean; username?: string; detail?: string; details?: string };
+  vercel: { configured: boolean; team_id?: string; token_present?: boolean; detail?: string; details?: string };
+  environment?: string;
+  summary: string | { total_configured: number; total_live: number; all_critical_live: boolean };
 }
 
 export interface WorkflowCreatePayload {

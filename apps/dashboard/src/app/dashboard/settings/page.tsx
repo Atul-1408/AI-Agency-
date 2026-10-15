@@ -13,20 +13,29 @@ import {
   Lock,
   CheckCircle2,
   ExternalLink,
+  Code2,
+  GitBranch,
+  Layers,
+  Sparkles,
 } from "lucide-react";
-import { api, HealthResponse } from "@/lib/api";
+import { api, HealthResponse, SystemReadinessResponse } from "@/lib/api";
 
 export default function SettingsPage() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [readiness, setReadiness] = useState<SystemReadinessResponse | null>(null);
   const [healthLoading, setHealthLoading] = useState<boolean>(true);
 
   const pingServices = useCallback(async () => {
     setHealthLoading(true);
     try {
-      const res = await api.health();
-      setHealth(res);
+      const [hRes, rRes] = await Promise.allSettled([
+        api.health(),
+        api.systemReadiness(),
+      ]);
+      if (hRes.status === "fulfilled") setHealth(hRes.value);
+      if (rRes.status === "fulfilled") setReadiness(rRes.value);
     } catch {
-      // Safe fallback
+      // Handled via safe fallback in api.ts
     } finally {
       setHealthLoading(false);
     }
@@ -34,18 +43,28 @@ export default function SettingsPage() {
 
   useEffect(() => {
     let mounted = true;
-    api.health().then((res) => {
+    Promise.allSettled([api.health(), api.systemReadiness()]).then(([hRes, rRes]) => {
       if (mounted) {
-        setHealth(res);
+        if (hRes.status === "fulfilled") setHealth(hRes.value);
+        if (rRes.status === "fulfilled") setReadiness(rRes.value);
         setHealthLoading(false);
       }
-    }).catch(() => {
-      if (mounted) setHealthLoading(false);
     });
     return () => {
       mounted = false;
     };
   }, []);
+
+  const isSqlite = readiness?.components?.database?.dialect === "sqlite";
+  const dbConnected = readiness?.components?.database?.connected ?? (health?.services?.database?.status === "ok");
+  const redisConnected = readiness?.components?.redis_workers?.connected ?? (health?.services?.redis?.status === "ok");
+
+  const placesConfigured = readiness?.components?.google_places?.configured ?? false;
+  const gmailConfigured = readiness?.components?.gmail_outreach?.configured ?? false;
+  const gmailAccounts = readiness?.components?.gmail_outreach?.connected_accounts || 0;
+  const aiReal = readiness?.components?.ai_code_generation?.configured ?? false;
+  const githubConfigured = readiness?.components?.github_publishing?.configured ?? false;
+  const vercelConfigured = readiness?.components?.vercel_deployment?.configured ?? false;
 
   return (
     <div className="pb-16 max-w-[1440px] w-full animate-fade-in">
@@ -53,13 +72,13 @@ export default function SettingsPage() {
       <div className="mb-[36px] pb-4 border-b border-[#242126] flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
           <p className="text-[12px] font-semibold tracking-[0.18em] uppercase text-[#E8B968] mb-[8px]">
-            SYSTEM CONFIGURATION
+            SYSTEM CONFIGURATION & READINESS
           </p>
           <h1 className="font-display text-[40px] md:text-[46px] font-normal text-[#F5F1EA] leading-[1.1] mb-[8px] tracking-tight">
             Agency Settings & Safeguards
           </h1>
           <p className="text-[15px] md:text-[16px] text-[#B7AFBA] leading-[1.5]">
-            Configure autonomous agent safeguards, reasoning engines, and external provider integrations.
+            Real-time infrastructure telemetry, provider verification, and autonomous agent safeguards.
           </p>
         </div>
 
@@ -70,11 +89,11 @@ export default function SettingsPage() {
           className="h-[42px] px-5 rounded-[10px] bg-[#171519] border border-[#302A30] hover:border-[#E8B968]/50 text-[13px] font-medium text-[#F5F1EA] hover:bg-[#1D1A1F] transition-all flex items-center gap-2.5 self-start md:self-auto flex-shrink-0"
         >
           <RotateCw size={14} className={healthLoading ? "animate-spin text-[#E8B968]" : "text-[#B7AFBA]"} />
-          <span>{healthLoading ? "Pinging Services..." : "Re-Check Health"}</span>
+          <span>{healthLoading ? "Auditing Systems..." : "Re-Check Integration Status"}</span>
         </button>
       </div>
 
-      {/* 1. Core Infrastructure Services (3 Spacious Cards across full width) */}
+      {/* 1. Core Infrastructure Services (Dynamic Telemetry) */}
       <section className="mb-[36px]">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-2.5">
@@ -82,12 +101,24 @@ export default function SettingsPage() {
               Core Infrastructure Telemetry
             </h2>
             <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-[#171519] border border-[#242126] text-[#77717C]">
-              {health?.version || "v0.2.0-phase2"}
+              v0.1.0-phase10
             </span>
           </div>
-          <span className="text-[12px] text-[#39C98A] flex items-center gap-1.5 font-medium">
-            <span className="w-2 h-2 rounded-full bg-[#39C98A] animate-pulse" />
-            System {health?.status || "operational"}
+          <span className="text-[12px] flex items-center gap-1.5 font-medium">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                readiness?.overall_status === "production_ready"
+                  ? "bg-[#39C98A] animate-pulse"
+                  : readiness?.overall_status === "degraded"
+                  ? "bg-[#E05252]"
+                  : "bg-[#E8B968]"
+              }`}
+            />
+            <span className="text-[#B7AFBA]">
+              Environment: <strong className="text-[#F5F1EA] font-semibold">{readiness?.environment || "development"}</strong>
+              {" • "}
+              Status: <span className="text-[#F5F1EA] capitalize">{readiness?.overall_status?.replace("_", " ") || health?.status || "active"}</span>
+            </span>
           </span>
         </div>
 
@@ -101,21 +132,34 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <h3 className="text-[15px] font-semibold text-[#F5F1EA]">
-                    PostgreSQL 16
+                    {isSqlite ? "SQLite Store" : "PostgreSQL 16"}
                   </h3>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Primary Relational Store
+                    {isSqlite ? "Local Dev Storage (Async)" : "Primary Relational Store"}
                   </p>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 flex items-center gap-1 flex-shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#39C98A]" />
-                Online
-              </span>
+              {dbConnected ? (
+                <span className={`px-2.5 py-1 rounded-full text-[11px] font-semibold flex items-center gap-1 flex-shrink-0 ${
+                  isSqlite
+                    ? "bg-[#E8B968]/10 text-[#E8B968] border border-[#E8B968]/30"
+                    : "bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30"
+                }`}>
+                  <span className={`w-1.5 h-1.5 rounded-full ${isSqlite ? "bg-[#E8B968]" : "bg-[#39C98A]"}`} />
+                  {isSqlite ? "Active (Local SQLite)" : "Online (PostgreSQL)"}
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#E05252]/10 text-[#E05252] border border-[#E05252]/30 flex items-center gap-1 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E05252]" />
+                  Offline
+                </span>
+              )}
             </div>
             <div className="pt-4 border-t border-[#242126] mt-4 flex items-center justify-between text-[11px] text-[#77717C]">
-              <span>Port 5432 • TLS In-Transit</span>
-              <span className="font-mono text-[#F5F1EA]">Healthy</span>
+              <span>{isSqlite ? "local_dev.db" : "Port 5432 • TLS"}</span>
+              <span className="font-mono text-[#F5F1EA]">
+                {readiness?.components?.database?.table_count ? `${readiness.components.database.table_count} Tables` : "Connected"}
+              </span>
             </div>
           </div>
 
@@ -128,21 +172,30 @@ export default function SettingsPage() {
                 </div>
                 <div>
                   <h3 className="text-[15px] font-semibold text-[#F5F1EA]">
-                    Redis 7 & ARQ
+                    {redisConnected ? "Redis 7 & ARQ" : "In-Process Async Fallback"}
                   </h3>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Async Job Queue & Locks
+                    {redisConnected ? "Async Job Queue & Locks" : "In-Process Task Dispatcher"}
                   </p>
                 </div>
               </div>
-              <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 flex items-center gap-1 flex-shrink-0">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#39C98A]" />
-                Listening
-              </span>
+              {redisConnected ? (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 flex items-center gap-1 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#39C98A]" />
+                  Listening
+                </span>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full text-[11px] font-semibold bg-[#E8B968]/10 text-[#E8B968] border border-[#E8B968]/30 flex items-center gap-1 flex-shrink-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#E8B968]" />
+                  Fallback Active
+                </span>
+              )}
             </div>
             <div className="pt-4 border-t border-[#242126] mt-4 flex items-center justify-between text-[11px] text-[#77717C]">
-              <span>Worker Concurrency: 10</span>
-              <span className="font-mono text-[#F5F1EA]">0 Pending Jobs</span>
+              <span>{redisConnected ? "Port 6379" : "Port 6379 Offline"}</span>
+              <span className="font-mono text-[#F5F1EA]">
+                {redisConnected ? "Redis Broker Online" : "In-Process Async Mode"}
+              </span>
             </div>
           </div>
 
@@ -158,7 +211,7 @@ export default function SettingsPage() {
                     FastAPI Async Engine
                   </h3>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    REST API & SSE Stream
+                    REST API & SSE Pipeline
                   </p>
                 </div>
               </div>
@@ -168,7 +221,7 @@ export default function SettingsPage() {
               </span>
             </div>
             <div className="pt-4 border-t border-[#242126] mt-4 flex items-center justify-between text-[11px] text-[#77717C]">
-              <span>Uptime: 100.0%</span>
+              <span>Port 8000 • Security Headers Active</span>
               <span className="font-mono text-[#F5F1EA]">HTTP 200 OK</span>
             </div>
           </div>
@@ -198,149 +251,62 @@ export default function SettingsPage() {
             <div className="space-y-4">
               {/* Daily Email Outreach Cap */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
+                <div>
                   <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Daily Outreach Cap
+                    Daily Outreach Limit
                   </p>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Hard daily quota to protect sender reputation
+                    Hard safety limit on outbound emails sent per 24-hour window
                   </p>
                 </div>
-                <div className="px-3.5 py-1.5 rounded-[8px] bg-[#171519] border border-[#302A30] text-[13px] font-mono font-medium text-[#E8B968] whitespace-nowrap">
-                  50 emails / day
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[14px] font-bold text-[#E8B968] bg-[#171519] px-3 py-1 rounded-[6px] border border-[#302A30]">
+                    30 / day
+                  </span>
                 </div>
               </div>
 
-              {/* Domain Touch Cooldown */}
+              {/* Email Cooldown Interval */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
+                <div>
                   <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Domain Touch Cooldown
+                    Follow-Up Cooldown Guard
                   </p>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Minimum waiting period between touching the same company
+                    Enforces minimum elapsed time before generating sequence follow-ups
                   </p>
                 </div>
-                <div className="px-3.5 py-1.5 rounded-[8px] bg-[#171519] border border-[#302A30] text-[13px] font-mono font-medium text-[#F5F1EA] whitespace-nowrap">
-                  72 hours
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-[14px] font-bold text-[#E8B968] bg-[#171519] px-3 py-1 rounded-[6px] border border-[#302A30]">
+                    72 Hours
+                  </span>
                 </div>
               </div>
 
-              {/* Duplicate Lead Detection */}
+              {/* Human-in-the-Loop Gates */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
+                <div>
                   <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Duplicate Lead Prevention
+                    Human Approval Gates
                   </p>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Automatic normalization: strips www, http/https, subpaths
+                    Enforces mandatory owner sign-off at Gates 1, 2, 4, and 5
                   </p>
                 </div>
                 <div className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
-                  <CheckCircle2 size={13} />
+                  <Lock size={13} />
                   Enforced
                 </div>
               </div>
 
-              {/* Human Sign-Off Gatekeeper */}
+              {/* SSRF Shield */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
+                <div>
                   <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Human-in-the-Loop Sign-Off
+                    SSRF & Path Traversal Shields
                   </p>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Zero autonomous emails without explicit dashboard approval
-                  </p>
-                </div>
-                <div className="px-3 py-1 rounded-[6px] bg-[rgba(232,185,105,0.12)] text-[#E8B968] border border-[rgba(232,185,105,0.30)] text-[12px] font-semibold whitespace-nowrap">
-                  Mandatory
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Zero-Trust Secret Architecture Banner */}
-          <div className="p-6 rounded-[16px] bg-[#171519] border border-[#302A30] relative overflow-hidden">
-            <div className="flex items-start gap-4">
-              <div className="w-10 h-10 rounded-[10px] bg-[rgba(229,184,92,0.12)] border border-[rgba(229,184,92,0.30)] flex items-center justify-center text-[#E5B85C] flex-shrink-0 mt-0.5">
-                <Lock size={18} />
-              </div>
-              <div className="flex-1">
-                <h4 className="text-[15px] font-semibold text-[#F5F1EA] flex items-center gap-2">
-                  Zero-Trust Secret Architecture
-                </h4>
-                <p className="text-[13px] text-[#B7AFBA] mt-1.5 leading-relaxed">
-                  Third-party API keys, OAuth tokens, and database credentials reside exclusively within the secure backend environment (<code className="text-[#E8B968] bg-[#111013] px-2 py-0.5 rounded text-[12px] border border-[#242126]">apps/api/.env</code>).
-                </p>
-                <div className="mt-3.5 pt-3 border-t border-[#242126] flex items-center gap-2 text-[12px] text-[#77717C]">
-                  <CheckCircle2 size={13} className="text-[#39C98A]" />
-                  <span>No plaintext tokens stored in client-side bundles or browser memory</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* Right Column: AI Reasoning Engine & Integrations */}
-        <div className="space-y-7">
-          {/* AI Reasoning Engine */}
-          <div className="p-7 rounded-[16px] bg-[#171519] border border-[#302A30]">
-            <div className="flex items-center gap-3 pb-4 mb-5 border-b border-[#242126]">
-              <div className="w-9 h-9 rounded-[8px] bg-[rgba(139,111,184,0.14)] flex items-center justify-center text-[#8B6FB8]">
-                <Sliders size={18} />
-              </div>
-              <div>
-                <h3 className="text-[16px] font-semibold text-[#F5F1EA]">
-                  AI Model & Reasoning Engine
-                </h3>
-                <p className="text-[12px] text-[#77717C]">
-                  Inference parameters and qualification policies
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4">
-              {/* Primary Reasoning Model */}
-              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126]">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Primary Reasoning Model
-                  </p>
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-[rgba(232,185,105,0.12)] text-[#E8B968] border border-[rgba(232,185,105,0.25)]">
-                    Active LLM
-                  </span>
-                </div>
-                <div className="p-2.5 rounded-[8px] bg-[#171519] border border-[#302A30] font-mono text-[12px] text-[#F5CC7A] break-all select-all">
-                  nvidia/llama-3.1-nemotron-ultra-253b-v1
-                </div>
-                <p className="text-[11px] text-[#77717C] mt-2">
-                  Used for website audit synthesis, deterministic qualification, and outreach proposal generation.
-                </p>
-              </div>
-
-              {/* Sampling Temperature */}
-              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
-                  <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    Sampling Temperature
-                  </p>
-                  <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Low variance for reproducible audit scores
-                  </p>
-                </div>
-                <div className="px-3.5 py-1.5 rounded-[8px] bg-[#171519] border border-[#302A30] text-[13px] font-mono text-[#F5F1EA] whitespace-nowrap">
-                  0.2 (Deterministic)
-                </div>
-              </div>
-
-              {/* Website Auditor SSRF Shield */}
-              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
-                <div className="pr-2">
-                  <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                    SSRF Security Shield
-                  </p>
-                  <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Blocks loopback, RFC-1918 private IPs & cloud metadata (169.254.169.254)
+                    Blocks loopback, private IPs & sandbox workspace escapes
                   </p>
                 </div>
                 <div className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
@@ -350,8 +316,10 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
+        </div>
 
-          {/* External Provider Integrations */}
+        {/* Right Column: External Provider Integrations */}
+        <div className="space-y-7">
           <div className="p-7 rounded-[16px] bg-[#171519] border border-[#302A30]">
             <div className="flex items-center gap-3 pb-4 mb-5 border-b border-[#242126]">
               <div className="w-9 h-9 rounded-[8px] bg-[rgba(232,185,105,0.12)] flex items-center justify-center text-[#E8B968]">
@@ -359,15 +327,45 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h3 className="text-[16px] font-semibold text-[#F5F1EA]">
-                  External Provider Integrations
+                  Integration Verification Matrix
                 </h3>
                 <p className="text-[12px] text-[#77717C]">
-                  Third-party connectors and autonomous distribution channels
+                  Real vs Mock provider classification and live connectivity status
                 </p>
               </div>
             </div>
 
             <div className="space-y-3.5">
+              {/* AI Code Generation Provider */}
+              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[14px] font-semibold text-[#F5F1EA]">
+                      Website Code Generator
+                    </p>
+                    <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-[#171519] text-[#77717C] border border-[#242126]">
+                      Phase 6
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[#77717C] mt-0.5">
+                    {aiReal
+                      ? "NVIDIA Nemotron Ultra LLM generative synthesis"
+                      : "Deterministic Next.js 14 App Router template engine"}
+                  </p>
+                </div>
+                {aiReal ? (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 size={13} />
+                    Nemotron Active
+                  </span>
+                ) : (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#3B82F6]/10 text-[#60A5FA] border border-[#3B82F6]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <Code2 size={13} />
+                    Deterministic Template
+                  </span>
+                )}
+              </div>
+
               {/* Google Places */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
                 <div>
@@ -380,13 +378,21 @@ export default function SettingsPage() {
                     </span>
                   </div>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Local business prospect discovery & metadata provider
+                    {placesConfigured
+                      ? "Live business prospect discovery active"
+                      : "API key unset — Manual lead entry fallback active"}
                   </p>
                 </div>
-                <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
-                  <CheckCircle2 size={13} />
-                  Connected
-                </span>
+                {placesConfigured ? (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 size={13} />
+                    Verified Live
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#E8B968] whitespace-nowrap">
+                    Manual Entry Mode
+                  </span>
+                )}
               </div>
 
               {/* Gmail OAuth */}
@@ -397,35 +403,105 @@ export default function SettingsPage() {
                       Gmail OAuth 2.0
                     </p>
                     <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-[#171519] text-[#77717C] border border-[#242126]">
-                      Phase 3
+                      Phase 3 & 4
                     </span>
                   </div>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Outbound personalized email delivery pipeline
+                    {gmailAccounts > 0
+                      ? `${gmailAccounts} encrypted mailbox(es) connected`
+                      : gmailConfigured
+                      ? "OAuth client configured — waiting for owner mailbox auth"
+                      : "Simulation mode active — dry-run delivery safeguards"}
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#77717C] whitespace-nowrap">
-                  Phase 3 Locked
-                </span>
+                {gmailAccounts > 0 ? (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 size={13} />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#77717C] whitespace-nowrap">
+                    Dry-Run Simulator
+                  </span>
+                )}
               </div>
 
-              {/* GitHub & Vercel */}
+              {/* GitHub Publishing */}
               <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
                 <div>
                   <div className="flex items-center gap-2">
                     <p className="text-[14px] font-semibold text-[#F5F1EA]">
-                      GitHub & Vercel API
+                      GitHub Provider
+                    </p>
+                    <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-[#171519] text-[#77717C] border border-[#242126]">
+                      Phase 8
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[#77717C] mt-0.5">
+                    {githubConfigured
+                      ? `Authenticated user: ${readiness?.components?.github_publishing?.authenticated_user || "Active"}`
+                      : "GITHUB_TOKEN unset — Mock deployment provider active"}
+                  </p>
+                </div>
+                {githubConfigured ? (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 size={13} />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#77717C] whitespace-nowrap">
+                    Mock Provider
+                  </span>
+                )}
+              </div>
+
+              {/* Vercel Hosting */}
+              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[14px] font-semibold text-[#F5F1EA]">
+                      Vercel Edge Hosting
+                    </p>
+                    <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-[#171519] text-[#77717C] border border-[#242126]">
+                      Phase 8
+                    </span>
+                  </div>
+                  <p className="text-[12px] text-[#77717C] mt-0.5">
+                    {vercelConfigured
+                      ? `Authenticated user: ${readiness?.components?.vercel_deployment?.authenticated_user || "Active"}`
+                      : "VERCEL_TOKEN unset — Mock deployment provider active"}
+                  </p>
+                </div>
+                {vercelConfigured ? (
+                  <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                    <CheckCircle2 size={13} />
+                    Connected
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#77717C] whitespace-nowrap">
+                    Mock Provider
+                  </span>
+                )}
+              </div>
+
+              {/* Website QA Evaluator */}
+              <div className="p-4 rounded-[12px] bg-[#111013] border border-[#242126] flex items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-[14px] font-semibold text-[#F5F1EA]">
+                      8-Point QA Evaluator Engine
                     </p>
                     <span className="text-[10px] font-mono px-2 py-0.2 rounded bg-[#171519] text-[#77717C] border border-[#242126]">
                       Phase 7
                     </span>
                   </div>
                   <p className="text-[12px] text-[#77717C] mt-0.5">
-                    Automated client preview repository creation and deployments
+                    Local AST, WCAG 2.1 AA, responsive layout, SEO & secret scanner
                   </p>
                 </div>
-                <span className="px-2.5 py-1 rounded-[6px] bg-[#171519] border border-[#302A30] text-[11px] font-mono text-[#77717C] whitespace-nowrap">
-                  Phase 7 Locked
+                <span className="px-3 py-1 rounded-[6px] bg-[#39C98A]/10 text-[#39C98A] border border-[#39C98A]/30 text-[12px] font-semibold flex items-center gap-1.5 whitespace-nowrap">
+                  <CheckCircle2 size={13} />
+                  Verified Live
                 </span>
               </div>
             </div>

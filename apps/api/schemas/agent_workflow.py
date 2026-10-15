@@ -81,6 +81,7 @@ class ProviderConnectivityResponse(BaseModel):
     database: Dict[str, Any]
     redis_queue: Dict[str, Any]
     ai_provider: Dict[str, Any]
+    google_places: Optional[Dict[str, Any]] = None
     gmail: Dict[str, Any]
     github: Dict[str, Any]
     vercel: Dict[str, Any]

@@ -339,7 +339,7 @@ export default function OrchestratorPage() {
             <div className="min-w-0">
               <div className="text-[11px] font-medium text-[#77717C]">Database</div>
               <div className="text-[12px] font-semibold text-[#F5F1EA] truncate">
-                {connectivity.database.connected ? `${connectivity.database.provider}` : "Disconnected"}
+                {connectivity.database.connected ? (connectivity.database.dialect === "sqlite" ? "SQLite (Local)" : "PostgreSQL") : "Disconnected"}
               </div>
             </div>
           </div>
@@ -349,27 +349,27 @@ export default function OrchestratorPage() {
             <div className="min-w-0">
               <div className="text-[11px] font-medium text-[#77717C]">Redis Worker</div>
               <div className="text-[12px] font-semibold text-[#F5F1EA] truncate">
-                {connectivity.redis_queue.connected ? "Active" : "Standalone Async"}
+                {connectivity.redis_queue.connected ? "Active" : "In-Process Async"}
               </div>
             </div>
           </div>
 
           <div className="p-3 rounded-xl bg-[#131215] border border-[#222026] flex items-center gap-3">
-            <Zap className={`w-4 h-4 ${connectivity.ai_provider.connected ? "text-[#39C98A]" : "text-[#E8B968]"}`} />
+            <Zap className={`w-4 h-4 ${connectivity.ai_provider.configured ? "text-[#39C98A]" : "text-[#60A5FA]"}`} />
             <div className="min-w-0">
-              <div className="text-[11px] font-medium text-[#77717C]">AI Provider</div>
+              <div className="text-[11px] font-medium text-[#77717C]">AI Generator</div>
               <div className="text-[12px] font-semibold text-[#F5F1EA] truncate">
-                {connectivity.ai_provider.connected ? connectivity.ai_provider.provider : "Simulated"}
+                {connectivity.ai_provider.configured ? connectivity.ai_provider.provider : "Deterministic"}
               </div>
             </div>
           </div>
 
           <div className="p-3 rounded-xl bg-[#131215] border border-[#222026] flex items-center gap-3">
-            <Mail className={`w-4 h-4 ${connectivity.gmail.connected ? "text-[#39C98A]" : "text-[#77717C]"}`} />
+            <Mail className={`w-4 h-4 ${connectivity.gmail.configured ? "text-[#39C98A]" : "text-[#77717C]"}`} />
             <div className="min-w-0">
               <div className="text-[11px] font-medium text-[#77717C]">Gmail OAuth</div>
               <div className="text-[12px] font-semibold text-[#F5F1EA] truncate">
-                {connectivity.gmail.connected ? "Connected" : "Unlinked"}
+                {connectivity.gmail.configured ? "Configured" : "Dry-Run Sim"}
               </div>
             </div>
           </div>

@@ -22,8 +22,9 @@ import structlog
 
 from core.config import settings
 from core.database import get_db
-from models.website_builder import WebsiteBuildSessionStatus
-from routers.auth import require_owner
+from models.website_builder import WebsiteBuildSessionStatus, WebsitePreview
+from routers.auth import get_optional_owner, require_owner
+import secrets
 from schemas.website_builder import (
     BuildSessionCancelRequest,
     BuildSessionPauseRequest,
@@ -1415,19 +1416,36 @@ async def render_preview(
     preview_id: uuid.UUID,
     token: Optional[str] = None,
     db: AsyncSession = Depends(get_db),
-    owner_email: str = Depends(require_owner),
+    owner_email: Optional[str] = Depends(get_optional_owner),
 ) -> HTMLResponse:
     """
     Renders the sandboxed website preview HTML.
-    Enforces owner authorization and strict Content-Security-Policy headers.
+    Enforces authorization via authenticated owner JWT or cryptographically secure preview token,
+    and returns strict Content-Security-Policy headers.
     """
-    verify_owner_access(owner_email)
-    try:
-        preview = await WebsitePreviewService.get_preview(
-            db=db,
-            preview_id=preview_id,
-            owner_id=owner_email,
+    preview = await db.get(WebsitePreview, preview_id)
+    if not preview:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Preview '{preview_id}' not found.",
         )
+
+    authorized = False
+    if owner_email:
+        verify_owner_access(owner_email)
+        if preview.owner_id == owner_email:
+            authorized = True
+    elif token and preview.preview_token and secrets.compare_digest(preview.preview_token, token):
+        authorized = True
+
+    if not authorized:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization required: valid owner token or preview token must be provided.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
         html_body = WebsitePreviewService.render_preview_html(preview)
         response = HTMLResponse(content=html_body, status_code=200)
         # Strict frame ancestor and content security policy
@@ -1437,10 +1455,12 @@ async def render_preview(
         response.headers["X-Frame-Options"] = "SAMEORIGIN"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
-    except PreviewNotFoundError as e:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except PreviewOwnershipError as e:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except Exception as e:
+        log.error("preview_render_failed", preview_id=str(preview_id), error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to render preview workspace.",
+        )
 
 
 # ── Phase 6.5 Iterative Editing Endpoints ─────────────────────────────────────

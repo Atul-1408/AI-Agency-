@@ -108,6 +108,23 @@ async def require_owner(
     return payload["sub"]
 
 
+async def get_optional_owner(
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
+) -> str | None:
+    """
+    FastAPI dependency.
+    Extracts and validates Bearer token if present, returning owner email.
+    Returns None if no token was provided or if token is invalid.
+    """
+    if credentials is None:
+        return None
+    try:
+        payload = decode_token(credentials.credentials)
+        return payload.get("sub")
+    except Exception:
+        return None
+
+
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/login", response_model=TokenResponse)

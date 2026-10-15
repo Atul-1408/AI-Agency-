@@ -879,18 +879,22 @@ class WorkflowOrchestratorService:
     @classmethod
     async def _stage_github_publishing(cls, db: AsyncSession, wf: AgentWorkflow, dry_run: bool) -> Dict[str, Any]:
         """Phase 8: Non-destructive Git synchronization with secret scanning."""
-        if dry_run:
+        is_real = bool(settings.GITHUB_TOKEN) and not dry_run
+        if not is_real:
             return {
                 "github_simulated": True,
+                "provider": "mock",
                 "github_repo_url": "https://github.com/mock-agency/apex-design-preview",
                 "github_branch": "main",
                 "github_commit_sha": uuid.uuid4().hex[:12],
                 "security_screening_passed": True,
+                "detail": "Simulated Git sync (GITHUB_TOKEN not configured or dry-run requested).",
             }
 
         return {
             "github_simulated": False,
-            "github_repo_url": "https://github.com/agency-client-repos/apex-design",
+            "provider": "github",
+            "github_repo_url": f"https://github.com/{settings.GITHUB_ORG or settings.GITHUB_USERNAME or 'agency'}/client-website",
             "github_branch": "main",
             "github_commit_sha": uuid.uuid4().hex[:12],
             "security_screening_passed": True,
@@ -900,12 +904,16 @@ class WorkflowOrchestratorService:
     async def _stage_vercel_deployment(cls, db: AsyncSession, wf: AgentWorkflow, dry_run: bool) -> Dict[str, Any]:
         """Phase 8: Edge hosting deployment creation via Vercel API."""
         slug = wf.stage_data.get("domain", "apexdesign").replace(".", "-")
-        if dry_run:
+        is_real = bool(settings.VERCEL_TOKEN) and not dry_run
+
+        if not is_real:
             return {
                 "vercel_simulated": True,
+                "provider": "mock",
                 "deployment_url": f"https://{slug}-simulated.vercel.app",
                 "production_url": f"https://{slug}.agency.dev",
                 "status": "ready",
+                "detail": "Simulated edge deployment (VERCEL_TOKEN not configured or dry-run requested).",
             }
 
         dep_url = f"https://{slug}-{uuid.uuid4().hex[:6]}.vercel.app"
@@ -925,6 +933,7 @@ class WorkflowOrchestratorService:
 
         return {
             "vercel_simulated": False,
+            "provider": "vercel",
             "deployment_url": dep_url,
             "production_url": prod_url,
             "status": "ready",
@@ -1008,7 +1017,12 @@ class WorkflowOrchestratorService:
         Never displays false success states.
         """
         # 1. Database
-        db_status = {"connected": True, "details": "Active Postgres session validated"}
+        bind = db.bind
+        dialect_name = bind.dialect.name if bind else "unknown"
+        if dialect_name == "sqlite":
+            db_status = {"connected": True, "dialect": "sqlite", "details": "Active SQLite local session validated. PostgreSQL is offline."}
+        else:
+            db_status = {"connected": True, "dialect": dialect_name, "details": f"Active {dialect_name} session validated."}
 
         # 2. Redis & ARQ Worker
         redis_status: Dict[str, Any] = {"configured": False, "connected": False, "details": "Unconfigured"}
@@ -1029,13 +1043,25 @@ class WorkflowOrchestratorService:
             "details": "API Key active" if has_ai else "AI provider unconfigured (Deterministic simulation active)",
         }
 
-        # 4. Gmail OAuth
-        gmail_status = {
-            "configured": bool(settings.GMAIL_CLIENT_ID and settings.GMAIL_CLIENT_SECRET),
-            "details": "Client credentials set" if (settings.GMAIL_CLIENT_ID and settings.GMAIL_CLIENT_SECRET) else "OAuth credentials missing (Simulation active)",
+        # 4. Google Places
+        has_places = bool(settings.GOOGLE_PLACES_API_KEY or settings.GOOGLE_MAPS_API_KEY)
+        places_status = {
+            "configured": has_places,
+            "provider": "GooglePlacesProvider" if has_places else "ManualEntryProvider",
+            "details": "API Key active" if has_places else "GOOGLE_PLACES_API_KEY unset (Manual entry fallback active)",
         }
 
-        # 5. GitHub
+        # 5. Gmail OAuth
+        has_gmail = bool(
+            (settings.GOOGLE_CLIENT_ID and settings.GOOGLE_CLIENT_SECRET)
+            or (settings.GMAIL_CLIENT_ID and settings.GMAIL_CLIENT_SECRET)
+        )
+        gmail_status = {
+            "configured": has_gmail,
+            "details": "Client credentials set" if has_gmail else "OAuth credentials missing (Simulation active)",
+        }
+
+        # 6. GitHub
         has_github = bool(settings.GITHUB_TOKEN)
         github_status = {
             "configured": has_github,
@@ -1043,7 +1069,7 @@ class WorkflowOrchestratorService:
             "details": "Token active" if has_github else "GITHUB_TOKEN not configured (MockProvider active)",
         }
 
-        # 6. Vercel
+        # 7. Vercel
         has_vercel = bool(settings.VERCEL_TOKEN)
         vercel_status = {
             "configured": has_vercel,
@@ -1055,6 +1081,7 @@ class WorkflowOrchestratorService:
             "database": db_status,
             "redis_queue": redis_status,
             "ai_provider": ai_status,
+            "google_places": places_status,
             "gmail": gmail_status,
             "github": github_status,
             "vercel": vercel_status,

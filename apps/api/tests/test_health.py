@@ -73,3 +73,49 @@ async def test_root_endpoint(client: AsyncClient):
     assert data["phase"] == 2
     assert "version" in data
     assert "health" in data
+
+
+@pytest.mark.asyncio
+async def test_security_headers_and_correlation_id(client: AsyncClient):
+    """Verify production security headers and correlation ID are set on responses."""
+    response = await client.get("/api/v1/health")
+    assert response.status_code == 200
+    assert "X-Correlation-ID" in response.headers
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-XSS-Protection"] == "1; mode=block"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert "Permissions-Policy" in response.headers
+
+
+@pytest.mark.asyncio
+async def test_system_readiness_endpoint(client: AsyncClient):
+    """Verify Phase 10 system readiness endpoint returns honest subsystem audit."""
+    response = await client.get("/api/v1/system/readiness")
+    assert response.status_code == 200
+    data = response.json()
+    assert "overall_status" in data
+    assert "components" in data
+    assert "database" in data["components"]
+    assert "redis_workers" in data["components"]
+    assert "ai_code_generation" in data["components"]
+    assert "github_publishing" in data["components"]
+    assert "vercel_deployment" in data["components"]
+    assert "website_qa_engine" in data["components"]
+    assert "workflow_orchestrator" in data["components"]
+
+
+def test_log_secret_scrubbing():
+    """Verify sensitive keys are scrubbed by logging processor."""
+    from core.logging import scrub_sensitive_data
+    event = {
+        "event": "user_action",
+        "api_key": "sk-secret-123456",
+        "github_token": "ghp_realtoken123",
+        "user_password": "supersecretpassword",
+        "idempotency_key": "safe-uuid-idempotency",
+    }
+    scrubbed = scrub_sensitive_data(None, "info", event)
+    assert scrubbed["api_key"] == "[REDACTED]"
+    assert scrubbed["github_token"] == "[REDACTED]"
+    assert scrubbed["user_password"] == "[REDACTED]"
+    assert scrubbed["idempotency_key"] == "safe-uuid-idempotency"

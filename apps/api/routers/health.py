@@ -8,10 +8,11 @@ the response says so clearly.
 from __future__ import annotations
 
 import structlog
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.config import settings
-from core.database import AsyncSessionLocal
+from core.database import AsyncSessionLocal, get_db
 from schemas import HealthResponse, ServiceStatus
 
 router = APIRouter()
@@ -85,3 +86,15 @@ async def health_check() -> HealthResponse:
         environment=settings.APP_ENV,
         services=services,
     )
+
+
+@router.get("/system/readiness", tags=["system", "health"])
+async def system_readiness(
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """
+    Phase 10: Complete Configuration and Integration Readiness Report.
+    Audits real vs mocked providers and configuration state honestly.
+    """
+    from services.system_readiness_service import SystemReadinessService
+    return await SystemReadinessService.get_full_readiness_report(db)
