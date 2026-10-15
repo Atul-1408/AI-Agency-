@@ -222,5 +222,23 @@ __all__ = [
     "SuppressionRecordCreate",
     "SuppressionRecordResponse",
     "DeliveryEventResponse",
+    # Phase 9
+    "WorkflowCreateRequest",
+    "WorkflowAdvanceRequest",
+    "WorkflowApprovalActionRequest",
+    "WorkflowStepRecordResponse",
+    "WorkflowResponse",
+    "WorkflowListResponse",
+    "ProviderConnectivityResponse",
 ]
+
+from schemas.agent_workflow import (
+    WorkflowCreateRequest,
+    WorkflowAdvanceRequest,
+    WorkflowApprovalActionRequest,
+    WorkflowStepRecordResponse,
+    WorkflowResponse,
+    WorkflowListResponse,
+    ProviderConnectivityResponse,
+)
 

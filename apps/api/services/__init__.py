@@ -37,4 +37,20 @@ __all__ = [
     "OutreachService",
     "DraftNotFoundError",
     "InvalidStateTransitionError",
+    # Phase 9
+    "WorkflowOrchestratorService",
+    "WorkflowError",
+    "WorkflowNotFoundError",
+    "WorkflowOwnershipError",
+    "WorkflowInvalidStateError",
+    "WorkflowGateRequiredError",
 ]
+
+from services.workflow_orchestrator_service import (
+    WorkflowOrchestratorService,
+    WorkflowError,
+    WorkflowNotFoundError,
+    WorkflowOwnershipError,
+    WorkflowInvalidStateError,
+    WorkflowGateRequiredError,
+)

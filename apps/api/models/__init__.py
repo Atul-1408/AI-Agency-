@@ -362,6 +362,15 @@ from models.website_deployment import (
     WebsiteDeploymentStatus,
     DeploymentProvider,
 )
+from models.agent_workflow import (
+    AgentWorkflow,
+    WorkflowStepRecord,
+    WorkflowExecutionMode,
+    WorkflowStatus,
+    WorkflowStage,
+    WORKFLOW_STAGE_ORDER,
+    HUMAN_APPROVAL_GATES,
+)
 
 __all__ = [
     # Mixins
@@ -450,4 +459,12 @@ __all__ = [
     "DeploymentEnvironment",
     "WebsiteDeploymentStatus",
     "DeploymentProvider",
+    # Phase 9
+    "AgentWorkflow",
+    "WorkflowStepRecord",
+    "WorkflowExecutionMode",
+    "WorkflowStatus",
+    "WorkflowStage",
+    "WORKFLOW_STAGE_ORDER",
+    "HUMAN_APPROVAL_GATES",
 ]

@@ -14,6 +14,7 @@ import {
   Circle,
   Sparkles,
   FolderKanban,
+  GitBranch,
 } from "lucide-react";
 
 interface NavItem {
@@ -26,6 +27,7 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { href: "/dashboard", label: "Overview", icon: Home },
+  { href: "/dashboard/orchestrator", label: "Orchestrator", icon: GitBranch },
   { href: "/dashboard/leads", label: "Leads", icon: LayoutGrid },
   { href: "/dashboard/outreach", label: "Outreach", icon: Mail },
   { href: "/dashboard/client-intelligence/prds", label: "Client PRDs", icon: FolderKanban },
@@ -133,7 +135,7 @@ export function Sidebar() {
               Pipeline Capability
             </span>
             <span className="text-[12px] font-bold text-[#39C98A] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
-              8 / 8 Active
+              9 / 9 Active
             </span>
           </div>
 
@@ -172,10 +174,10 @@ export function Sidebar() {
                 <span className="w-4 h-4 rounded-full bg-[#39C98A]/25 border border-[#39C98A]/50 flex items-center justify-center text-[#39C98A]">
                   <Check size={9} strokeWidth={3} />
                 </span>
-                <span className="text-[#F5F1EA] font-medium">Phase 7</span>
+                <span className="text-[#F5F1EA] font-medium">Phases 7–8</span>
               </div>
               <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#39C98A]/15 border border-[#39C98A]/30 text-[#39C98A]">
-                QA Evaluator
+                QA & Deploy
               </span>
             </div>
 
@@ -184,10 +186,10 @@ export function Sidebar() {
                 <span className="w-4 h-4 rounded-full bg-[#39C98A]/25 border border-[#39C98A]/50 flex items-center justify-center text-[#39C98A]">
                   <Check size={9} strokeWidth={3} />
                 </span>
-                <span className="text-[#F5F1EA] font-medium">Phase 8</span>
+                <span className="text-[#F5F1EA] font-medium">Phase 9</span>
               </div>
-              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#39C98A]/15 border border-[#39C98A]/30 text-[#39C98A]">
-                Production Deploy
+              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#E8B968]/20 border border-[#E8B968]/40 text-[#F5CC7A]">
+                Orchestrator
               </span>
             </div>
           </div>

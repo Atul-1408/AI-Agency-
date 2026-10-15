@@ -750,6 +750,46 @@ export const api = {
     verifyDomain: (deploymentId: string) =>
       apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/domains/verify`),
   },
+  // Phase 9 Complete Agent Orchestration
+  workflow: {
+    create: (payload: WorkflowCreatePayload) =>
+      apiFetch<AgentWorkflow>("/api/v1/workflows", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    list: (params?: { page?: number; page_size?: number; status?: string }) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {})
+          .filter(([, v]) => v !== undefined && v !== "all" && v !== "")
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return apiFetch<WorkflowListResponse>(`/api/v1/workflows${qs ? `?${qs}` : ""}`);
+    },
+    get: (workflowId: string) =>
+      apiFetch<AgentWorkflow>(`/api/v1/workflows/${workflowId}`),
+    advance: (workflowId: string, inputOverrides?: Record<string, unknown>) =>
+      apiFetch<AgentWorkflow>(`/api/v1/workflows/${workflowId}/advance`, {
+        method: "POST",
+        body: JSON.stringify({ input_overrides: inputOverrides }),
+      }),
+    approve: (workflowId: string, payload: { decision: "approved" | "rejected"; notes?: string }) =>
+      apiFetch<AgentWorkflow>(`/api/v1/workflows/${workflowId}/approve`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    retry: (workflowId: string) =>
+      apiFetch<AgentWorkflow>(`/api/v1/workflows/${workflowId}/retry`, {
+        method: "POST",
+      }),
+    cancel: (workflowId: string, reason?: string) => {
+      const qs = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+      return apiFetch<AgentWorkflow>(`/api/v1/workflows/${workflowId}/cancel${qs}`, {
+        method: "POST",
+      });
+    },
+    connectivity: () =>
+      apiFetch<ProviderConnectivityResponse>("/api/v1/workflows/connectivity"),
+  },
 };
 
 
@@ -1684,5 +1724,113 @@ export interface DomainVerificationResult {
   verified: boolean;
   ssl_status: string;
   verification_error?: string | null;
+}
+
+// ── Phase 9 Complete Agent Orchestration Types ──────────────────────────────
+
+export type WorkflowExecutionMode = "manual" | "supervised" | "dry_run";
+
+export type WorkflowStatus =
+  | "created"
+  | "running"
+  | "paused_for_approval"
+  | "failed"
+  | "completed"
+  | "cancelled";
+
+export type WorkflowStage =
+  | "lead_discovery"
+  | "research"
+  | "qualification"
+  | "gate_1_lead_approval"
+  | "outreach_draft"
+  | "gate_2_outreach_approval"
+  | "safety_checks"
+  | "gmail_dispatch"
+  | "reply_detection"
+  | "client_requirements"
+  | "requirement_review"
+  | "prd_generation"
+  | "gate_4_prd_approval"
+  | "project_creation"
+  | "website_specification"
+  | "design_blueprint"
+  | "code_generation"
+  | "preview_and_editing"
+  | "website_qa"
+  | "repair_and_recheck"
+  | "gate_5_deployment_approval"
+  | "github_publishing"
+  | "vercel_deployment"
+  | "deployment_verification";
+
+export interface WorkflowStepRecord {
+  id: string;
+  workflow_id: string;
+  stage: string;
+  status: string;
+  duration_ms: number;
+  input_snapshot?: Record<string, unknown> | null;
+  output_snapshot?: Record<string, unknown> | null;
+  error_message?: string | null;
+  is_dry_run: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentWorkflow {
+  id: string;
+  owner_id: string;
+  title: string;
+  description?: string | null;
+  mode: WorkflowExecutionMode;
+  status: WorkflowStatus;
+  current_stage: WorkflowStage;
+  completed_stages: Array<Record<string, unknown>>;
+  pending_stages: string[];
+  stage_data: Record<string, unknown>;
+  current_approval_id?: string | null;
+  error_state?: {
+    stage?: string;
+    error?: string;
+    failed_at?: string;
+    can_retry?: boolean;
+    retry_guidance?: string;
+    reason?: string;
+    cancelled_by?: string;
+  } | null;
+  is_dry_run: boolean;
+  idempotency_key?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+  step_records: WorkflowStepRecord[];
+}
+
+export interface WorkflowListResponse {
+  total: number;
+  page: number;
+  page_size: number;
+  items: AgentWorkflow[];
+}
+
+export interface ProviderConnectivityResponse {
+  database: { connected: boolean; provider: string; latency_ms?: number; detail?: string };
+  redis_queue: { connected: boolean; url: string; detail: string; pending_jobs?: number };
+  ai_provider: { connected: boolean; provider: string; model: string; detail: string };
+  gmail: { connected: boolean; email?: string; scopes?: string[]; token_valid?: boolean; detail: string };
+  github: { configured: boolean; target_owner?: string; token_present: boolean; detail: string };
+  vercel: { configured: boolean; team_id?: string; token_present: boolean; detail: string };
+  summary: { total_configured: number; total_live: number; all_critical_live: boolean };
+}
+
+export interface WorkflowCreatePayload {
+  title: string;
+  description?: string;
+  mode?: WorkflowExecutionMode;
+  is_dry_run?: boolean;
+  idempotency_key?: string;
+  initial_data?: Record<string, unknown>;
 }
 
