@@ -71,8 +71,9 @@ async def run_qa_agent(ctx: dict, run_id: str, input_data: dict) -> dict:
 
 
 async def run_deployment_agent(ctx: dict, run_id: str, input_data: dict) -> dict:
-    """Phase 8: Not yet implemented."""
-    return {"status": "not_implemented", "phase": 8}
+    """Phase 8: Active. Calls DeploymentAgent().run()."""
+    from agents.deployment_agent import DeploymentAgent
+    return await DeploymentAgent().run(run_id, input_data)
 
 
 # ── Lifecycle Hooks ───────────────────────────────────────────────────────────

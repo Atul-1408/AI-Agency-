@@ -354,6 +354,15 @@ from models.website_qa import (
     QAFindingCategory,
 )
 
+# ── Phase 8 Models ────────────────────────────────────────────────────────────
+
+from models.website_deployment import (
+    WebsiteDeployment,
+    DeploymentEnvironment,
+    WebsiteDeploymentStatus,
+    DeploymentProvider,
+)
+
 __all__ = [
     # Mixins
     "TimestampMixin",
@@ -436,4 +445,9 @@ __all__ = [
     "WebsiteQAFinding",
     "QAFindingSeverity",
     "QAFindingCategory",
+    # Phase 8
+    "WebsiteDeployment",
+    "DeploymentEnvironment",
+    "WebsiteDeploymentStatus",
+    "DeploymentProvider",
 ]

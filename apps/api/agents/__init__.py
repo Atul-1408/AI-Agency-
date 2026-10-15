@@ -17,5 +17,6 @@ from agents.base_agent import AIProvider, BaseAgent
 from agents.orchestrator import Orchestrator
 from agents.lead_research import LeadResearchAgent
 from agents.qa_agent import QAAgent
+from agents.deployment_agent import DeploymentAgent
 
-__all__ = ["BaseAgent", "AIProvider", "Orchestrator", "LeadResearchAgent", "QAAgent"]
+__all__ = ["BaseAgent", "AIProvider", "Orchestrator", "LeadResearchAgent", "QAAgent", "DeploymentAgent"]

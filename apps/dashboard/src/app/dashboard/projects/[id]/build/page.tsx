@@ -25,6 +25,12 @@ import {
   type WebsiteQAFinding,
   type WebsiteQARunDetail,
   type QAFindingSeverity,
+  type WebsiteDeployment,
+  type WebsiteDeploymentStatus,
+  type DeploymentEnvironment,
+  type DeploymentProvider,
+  type DeploymentEligibilityResponse,
+  type DomainVerificationResult,
 } from "@/lib/api";
 import {
   ArrowLeft,
@@ -75,6 +81,12 @@ import {
   Wand2,
   Undo2,
   RefreshCw,
+  Rocket,
+  UploadCloud,
+  Globe,
+  GitBranch,
+  Server,
+  Share2,
 } from "lucide-react";
 
 
@@ -130,6 +142,17 @@ export default function WebsiteBuildWorkspacePage({
   const [qaLoading, setQaLoading] = useState<boolean>(false);
   const [repairingFindingId, setRepairingFindingId] = useState<string | null>(null);
   const [severityFilter, setSeverityFilter] = useState<"all" | QAFindingSeverity>("all");
+
+  // Phase 8 Production Deployment State
+  const [deployments, setDeployments] = useState<WebsiteDeployment[]>([]);
+  const [activeDeployment, setActiveDeployment] = useState<WebsiteDeployment | null>(null);
+  const [deploymentEligibility, setDeploymentEligibility] = useState<DeploymentEligibilityResponse | null>(null);
+  const [deployLoading, setDeployLoading] = useState<boolean>(false);
+  const [deployActionLoading, setDeployActionLoading] = useState<boolean>(false);
+  const [selectedEnv, setSelectedEnv] = useState<DeploymentEnvironment>("production");
+  const [approvalNotesInput, setApprovalNotesInput] = useState<string>("");
+  const [customDomainInput, setCustomDomainInput] = useState<string>("");
+  const [domainVerification, setDomainVerification] = useState<DomainVerificationResult | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
@@ -230,6 +253,27 @@ export default function WebsiteBuildWorkspacePage({
     }
   }, []);
 
+  const loadDeploymentsAndEligibility = useCallback(async (projId: string) => {
+    try {
+      const [depList, elig] = await Promise.all([
+        api.deployment.listDeployments(projId),
+        api.deployment.checkEligibility(projId),
+      ]);
+      const list = Array.isArray(depList) ? depList : [];
+      setDeployments(list);
+      if (list.length > 0) {
+        setActiveDeployment(list[0]);
+      } else {
+        setActiveDeployment(null);
+      }
+      setDeploymentEligibility(elig);
+    } catch {
+      setDeployments([]);
+      setActiveDeployment(null);
+      setDeploymentEligibility(null);
+    }
+  }, []);
+
   const loadData = useCallback(async () => {
     try {
       setLoading(true);
@@ -241,9 +285,10 @@ export default function WebsiteBuildWorkspacePage({
       setProject(projData);
       setSessions(sessionListData.items);
 
-      // Load Previews, Edits, and Versions for project
+      // Load Previews, Edits, Versions, QA Runs, and Deployments
       await loadPreviewsAndVersions(projectId);
       await loadQARuns(projectId);
+      await loadDeploymentsAndEligibility(projectId);
 
       // Find current active session or most recent session
       const active = sessionListData.items.find((s) =>
@@ -288,7 +333,7 @@ export default function WebsiteBuildWorkspacePage({
     } finally {
       setLoading(false);
     }
-  }, [projectId, loadBlueprintsForGen, loadCodeGensForSession, loadPreviewsAndVersions]);
+  }, [projectId, loadBlueprintsForGen, loadCodeGensForSession, loadPreviewsAndVersions, loadQARuns, loadDeploymentsAndEligibility]);
 
 
 
@@ -646,6 +691,148 @@ export default function WebsiteBuildWorkspacePage({
       setSelectedQARun(detail);
     } catch {
       // Ignore
+    }
+  };
+
+  // Phase 8 Deployment Handlers
+  const handleCheckEligibility = async () => {
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      const elig = await api.deployment.checkEligibility(projectId);
+      setDeploymentEligibility(elig);
+      const isElig = elig.is_eligible ?? elig.eligible;
+      if (isElig) {
+        setSuccessMessage("Project is 100% eligible for production deployment (Gate 5 clearance).");
+      } else {
+        setError(`Deployment Ineligible: ${elig.reasons.join("; ")}`);
+      }
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to check deployment eligibility.");
+    } finally {
+      setDeployActionLoading(false);
+    }
+  };
+
+  const handleRequestDeployment = async () => {
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const dep = await api.deployment.requestDeployment(projectId, {
+        environment: selectedEnv,
+        code_generation_id: selectedCodeGen?.id,
+      });
+      setSuccessMessage(
+        selectedEnv === "production"
+          ? "Production deployment requested. Gate 5 Human Owner Approval is required before execution."
+          : "Preview deployment created and cleared for execution."
+      );
+      await loadDeploymentsAndEligibility(projectId);
+      setActiveDeployment(dep);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to request deployment.");
+    } finally {
+      setDeployActionLoading(false);
+    }
+  };
+
+  const handleApproveDeployment = async (deploymentId: string) => {
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const dep = await api.deployment.approveDeployment(deploymentId, {
+        notes: approvalNotesInput.trim() || undefined,
+      });
+      setSuccessMessage("Gate 5 Human Owner Approval GRANTED. Production release unlocked.");
+      setApprovalNotesInput("");
+      await loadDeploymentsAndEligibility(projectId);
+      setActiveDeployment(dep);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to approve deployment.");
+    } finally {
+      setDeployActionLoading(false);
+    }
+  };
+
+  const handleExecuteDeployment = async (deploymentId: string) => {
+    try {
+      setDeployLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const dep = await api.deployment.executeDeployment(deploymentId);
+      setSuccessMessage(`Deployment completed! Live URL: ${dep.deployment_url || dep.production_url}`);
+      await loadDeploymentsAndEligibility(projectId);
+      setActiveDeployment(dep);
+      const updatedProj = await api.projects.get(projectId);
+      setProject(updatedProj);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Deployment execution failed.");
+    } finally {
+      setDeployLoading(false);
+    }
+  };
+
+  const handleCancelDeployment = async (deploymentId: string) => {
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const dep = await api.deployment.cancelDeployment(deploymentId, "Cancelled by user");
+      setSuccessMessage("Deployment request cancelled.");
+      await loadDeploymentsAndEligibility(projectId);
+      setActiveDeployment(dep);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to cancel deployment.");
+    } finally {
+      setDeployActionLoading(false);
+    }
+  };
+
+  const handleConfigureDomain = async (deploymentId: string) => {
+    if (!customDomainInput.trim()) return;
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const res = await api.deployment.configureDomain(deploymentId, {
+        domain: customDomainInput.trim(),
+      });
+      setSuccessMessage(`Custom domain '${res.custom_domain}' configured with required DNS records.`);
+      await loadDeploymentsAndEligibility(projectId);
+      setActiveDeployment(res);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to configure custom domain.");
+    } finally {
+      setDeployActionLoading(false);
+    }
+  };
+
+  const handleVerifyDomain = async (deploymentId: string) => {
+    try {
+      setDeployActionLoading(true);
+      setError(null);
+      setSuccessMessage(null);
+      const res = await api.deployment.verifyDomain(deploymentId);
+      const isVerified = res.ssl_status === "active" || res.ssl_status === "configured";
+      setDomainVerification({
+        domain: res.custom_domain || "",
+        verified: isVerified,
+        ssl_status: res.ssl_status,
+        verification_error: isVerified ? null : "DNS verification in progress or propagating.",
+      });
+      setActiveDeployment(res);
+      if (isVerified) {
+        setSuccessMessage(`Custom domain '${res.custom_domain}' successfully verified! SSL certificate active.`);
+      } else {
+        setSuccessMessage(`Verification polled for '${res.custom_domain}'. Status: ${res.ssl_status}`);
+      }
+      await loadDeploymentsAndEligibility(projectId);
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to verify domain.");
+    } finally {
+      setDeployActionLoading(false);
     }
   };
 
@@ -2448,11 +2635,517 @@ export default function WebsiteBuildWorkspacePage({
               </div>
             )}
           </div>
+
+          {/* Phase 8 — Production Deployment & Cloud Hosting */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-purple-500/30 space-y-6">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-[#242126] pb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-500/15 border border-purple-500/30 text-purple-400">
+                  <Rocket className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-[#F5F1EA]">
+                      Phase 8 — Production Deployment & Cloud Hosting
+                    </h2>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                      Live Gate 5
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#77717C]">
+                    Automated GitHub repository synchronization, Vercel edge deployment, and custom domain DNS configuration.
+                  </p>
+                </div>
+              </div>
+
+              {/* Environment Selector and Action Buttons */}
+              <div className="flex items-center gap-2 flex-wrap">
+                <div className="flex items-center p-1 rounded-xl bg-[#1B191E] border border-[#242126]">
+                  <button
+                    onClick={() => setSelectedEnv("production")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      selectedEnv === "production"
+                        ? "bg-[#E8B968] text-[#0B0A0C] shadow-sm"
+                        : "text-[#77717C] hover:text-[#F5F1EA]"
+                    }`}
+                  >
+                    Production
+                  </button>
+                  <button
+                    onClick={() => setSelectedEnv("preview")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${
+                      selectedEnv === "preview"
+                        ? "bg-purple-600 text-white shadow-sm"
+                        : "text-[#77717C] hover:text-[#F5F1EA]"
+                    }`}
+                  >
+                    Preview
+                  </button>
+                </div>
+
+                <button
+                  onClick={handleCheckEligibility}
+                  disabled={deployActionLoading}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1B191E] hover:bg-[#242126] border border-[#242126] text-xs font-semibold text-[#F5F1EA] transition-all disabled:opacity-50"
+                  title="Verify code generation and QA gate requirements"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${deployActionLoading ? "animate-spin" : ""}`} />
+                  Check Gate
+                </button>
+
+                <button
+                  onClick={handleRequestDeployment}
+                  disabled={deployActionLoading || (selectedEnv === "production" && (deploymentEligibility?.is_eligible ?? deploymentEligibility?.eligible) === false)}
+                  className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-xs transition-all shadow-lg shadow-purple-900/30 disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  <UploadCloud className="w-4 h-4" />
+                  Request {selectedEnv === "production" ? "Production" : "Preview"}
+                </button>
+              </div>
+            </div>
+
+            {/* Server-Side Eligibility Banner */}
+            {deploymentEligibility && (
+              <div
+                className={`p-4 rounded-xl border flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs ${
+                  (deploymentEligibility.is_eligible ?? deploymentEligibility.eligible)
+                    ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-200"
+                    : "bg-amber-500/10 border-amber-500/30 text-amber-200"
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  {(deploymentEligibility.is_eligible ?? deploymentEligibility.eligible) ? (
+                    <ShieldCheck className="w-5 h-5 text-emerald-400 shrink-0" />
+                  ) : (
+                    <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                  )}
+                  <div>
+                    <div className="font-semibold flex items-center gap-2">
+                      <span>
+                        {(deploymentEligibility.is_eligible ?? deploymentEligibility.eligible)
+                          ? "Gate 5 Production Clearance Granted"
+                          : "Production Deployment Gate: Ineligible"}
+                      </span>
+                      {deploymentEligibility.qa_score !== null && (
+                        <span className="px-2 py-0.5 rounded text-[10px] bg-black/40 border border-current font-mono">
+                          QA Score: {deploymentEligibility.qa_score}/100
+                        </span>
+                      )}
+                    </div>
+                    {deploymentEligibility.reasons.length > 0 && (
+                      <p className="text-[11px] opacity-90 mt-0.5">
+                        {deploymentEligibility.reasons.join(" • ")}
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-[11px] opacity-80">
+                    Blockers: <strong className="font-mono">{deploymentEligibility.blocker_defects ?? deploymentEligibility.blocker_findings}</strong> | High: <strong className="font-mono">{deploymentEligibility.high_defects ?? deploymentEligibility.high_findings}</strong>
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Active Deployment Orchestration */}
+            {activeDeployment ? (
+              <div className="space-y-4">
+                {/* Deployment Metadata Overview */}
+                <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] space-y-3">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-2 border-b border-[#242126] pb-3">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-bold text-[#F5F1EA]">
+                        Release v{activeDeployment.source_version}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                          activeDeployment.environment === "production"
+                            ? "bg-[#E8B968]/20 text-[#E8B968] border border-[#E8B968]/40"
+                            : "bg-blue-500/20 text-blue-400 border border-blue-500/40"
+                        }`}
+                      >
+                        {activeDeployment.environment}
+                      </span>
+                      <span
+                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${
+                          activeDeployment.status === "deployed"
+                            ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                            : activeDeployment.status === "deploying"
+                            ? "bg-cyan-500/20 text-cyan-400 border-cyan-500/40 animate-pulse"
+                            : activeDeployment.status === "awaiting_approval"
+                            ? "bg-amber-500/20 text-amber-400 border-amber-500/40"
+                            : activeDeployment.status === "failed"
+                            ? "bg-red-500/20 text-red-400 border-red-500/40"
+                            : "bg-purple-500/20 text-purple-300 border-purple-500/40"
+                        }`}
+                      >
+                        {activeDeployment.status.replace(/_/g, " ")}
+                      </span>
+                      <span className="px-2 py-0.5 rounded text-[10px] font-mono text-[#77717C] bg-[#111013] border border-[#242126]">
+                        {activeDeployment.provider.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-[#77717C] font-mono">
+                      ID: {activeDeployment.id.slice(0, 8)}...
+                    </div>
+                  </div>
+
+                  {/* Gate 5 Human Owner Approval Form */}
+                  {activeDeployment.status === "awaiting_approval" && (
+                    <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 space-y-3">
+                      <div className="flex items-center gap-2 text-amber-300 text-xs font-bold">
+                        <Lock className="w-4 h-4" />
+                        Gate 5 Human Owner Approval Required
+                      </div>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        Production deployments mandate explicit owner sign-off. Approving this deployment will trigger non-destructive Git synchronization with security scanning, provenance tracking, and edge hosting deployment.
+                      </p>
+                      <div className="space-y-2">
+                        <input
+                          type="text"
+                          value={approvalNotesInput}
+                          onChange={(e) => setApprovalNotesInput(e.target.value)}
+                          placeholder="Owner approval notes (e.g. Approved production deployment for v1 release)..."
+                          className="w-full px-3 py-2 rounded-lg bg-[#111013] border border-amber-500/40 text-xs text-[#F5F1EA] placeholder-[#77717C] focus:outline-none focus:border-amber-400 font-mono"
+                        />
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            onClick={() => handleApproveDeployment(activeDeployment.id)}
+                            disabled={deployActionLoading}
+                            className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors disabled:opacity-50"
+                          >
+                            <CheckCheck className="w-3.5 h-3.5" />
+                            Approve for Production
+                          </button>
+                          <button
+                            onClick={() => handleCancelDeployment(activeDeployment.id)}
+                            disabled={deployActionLoading}
+                            className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-[#242126] hover:bg-red-900/50 hover:text-red-200 text-[#A9A4AE] text-xs font-semibold transition-colors disabled:opacity-50"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            Cancel Request
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Execution Trigger (Approved or Preview Pending) */}
+                  {(activeDeployment.status === "approved" ||
+                    (activeDeployment.status === "ready_for_deployment" && activeDeployment.environment === "preview")) && (
+                    <div className="p-4 rounded-xl bg-purple-500/10 border border-purple-500/30 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-purple-200 flex items-center gap-2">
+                          <PlayCircle className="w-4 h-4 text-purple-400" />
+                          Ready for Cloud Execution
+                        </div>
+                        <p className="text-[11px] text-purple-300/80">
+                          {activeDeployment.status === "approved"
+                            ? "Gate 5 approval confirmed. Ready to publish to GitHub and deploy to Vercel."
+                            : "Preview environment cleared for immediate deployment."}
+                        </p>
+                      </div>
+
+                      <button
+                        onClick={() => handleExecuteDeployment(activeDeployment.id)}
+                        disabled={deployLoading}
+                        className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-semibold text-xs transition-all shadow-lg shadow-purple-900/40 disabled:opacity-50 shrink-0"
+                      >
+                        {deployLoading ? (
+                          <>
+                            <RotateCw className="w-4 h-4 animate-spin" />
+                            Deploying Application...
+                          </>
+                        ) : (
+                          <>
+                            <Rocket className="w-4 h-4" />
+                            Deploy to {activeDeployment.environment === "production" ? "Production" : "Preview"} Now
+                          </>
+                        )}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Deployment Failure Alert */}
+                  {activeDeployment.status === "failed" && (
+                    <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 space-y-2">
+                      <div className="flex items-center gap-2 text-red-400 text-xs font-bold">
+                        <XCircle className="w-4 h-4" />
+                        Deployment Execution Failed
+                      </div>
+                      <p className="text-xs text-red-300 font-mono">
+                        {activeDeployment.error_message || "Unknown deployment pipeline failure occurred."}
+                      </p>
+                      <button
+                        onClick={handleRequestDeployment}
+                        className="mt-1 px-3 py-1.5 rounded-lg bg-[#242126] hover:bg-[#38333D] text-xs font-semibold text-[#F5F1EA] transition-all"
+                      >
+                        Request New Deployment
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Live URLs and Provenance Information */}
+                  {(activeDeployment.status === "deployed" || activeDeployment.deployment_url) && (
+                    <div className="space-y-4 pt-2">
+                      {/* Live URLs */}
+                      <div className="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/30 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+                            <CheckCircle2 className="w-4 h-4" />
+                            Deployment Live & Operational
+                          </span>
+                          <span className="text-[10px] text-emerald-400 font-mono">
+                            {new Date(activeDeployment.updated_at).toLocaleTimeString()}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+                          {activeDeployment.deployment_url && (
+                            <div className="p-2.5 rounded-lg bg-[#111013] border border-[#242126] space-y-1">
+                              <span className="text-[10px] uppercase font-semibold text-[#77717C] block">
+                                Immutable Deployment URL:
+                              </span>
+                              <a
+                                href={activeDeployment.deployment_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-purple-300 hover:text-purple-200 underline font-mono flex items-center gap-1 truncate"
+                              >
+                                {activeDeployment.deployment_url}
+                                <ExternalLink className="w-3 h-3 shrink-0" />
+                              </a>
+                            </div>
+                          )}
+
+                          {activeDeployment.production_url && (
+                            <div className="p-2.5 rounded-lg bg-[#111013] border border-[#242126] space-y-1">
+                              <span className="text-[10px] uppercase font-semibold text-[#77717C] block">
+                                Production Domain:
+                              </span>
+                              <a
+                                href={activeDeployment.production_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-[#E8B968] hover:underline font-mono flex items-center gap-1 truncate font-semibold"
+                              >
+                                {activeDeployment.production_url}
+                                <ExternalLink className="w-3 h-3 shrink-0" />
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Provenance & Git Tracking */}
+                      <div className="p-3.5 rounded-xl bg-[#111013] border border-[#242126] space-y-2 text-xs">
+                        <div className="text-[11px] font-semibold text-[#77717C] uppercase tracking-wider flex items-center gap-1.5">
+                          <GitBranch className="w-3.5 h-3.5 text-purple-400" />
+                          Source Control & Provenance
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-2 text-xs">
+                          <div className="text-[#77717C]">
+                            Repository:{" "}
+                            {activeDeployment.github_repo_url ? (
+                              <a
+                                href={activeDeployment.github_repo_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-purple-300 underline font-mono truncate inline-block max-w-[150px] align-bottom"
+                              >
+                                {activeDeployment.github_repo_url.replace("https://github.com/", "")}
+                              </a>
+                            ) : (
+                              <span className="font-mono text-[#F5F1EA]">Local Workspace</span>
+                            )}
+                          </div>
+
+                          <div className="text-[#77717C]">
+                            Branch: <span className="font-mono text-[#F5F1EA]">{activeDeployment.github_branch || "main"}</span>
+                          </div>
+
+                          <div className="text-[#77717C]">
+                            Commit SHA:{" "}
+                            <span className="font-mono text-[#E8B968]">
+                              {activeDeployment.github_commit_sha ? activeDeployment.github_commit_sha.slice(0, 7) : "N/A"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Custom Domain & DNS Manager */}
+                      {activeDeployment.environment === "production" && (
+                        <div className="p-4 rounded-xl bg-[#161519] border border-[#2B2730] space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Globe className="w-4 h-4 text-[#E8B968]" />
+                              <span className="text-xs font-bold text-[#F5F1EA]">
+                                Custom Domain & DNS Management
+                              </span>
+                            </div>
+                            {activeDeployment.custom_domain && (
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                                SSL: {activeDeployment.ssl_status?.toUpperCase() || "ACTIVE"}
+                              </span>
+                            )}
+                          </div>
+
+                          <p className="text-[11px] text-[#77717C]">
+                            Attach an enterprise custom domain to this deployment. Configure your registrar DNS records and trigger instant verification.
+                          </p>
+
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              value={customDomainInput}
+                              onChange={(e) => setCustomDomainInput(e.target.value)}
+                              placeholder={activeDeployment.custom_domain || "e.g. app.myagency.com"}
+                              className="flex-1 px-3 py-2 rounded-lg bg-[#111013] border border-[#242126] text-xs text-[#F5F1EA] placeholder-[#77717C] focus:outline-none focus:border-[#E8B968] font-mono"
+                            />
+                            <button
+                              onClick={() => handleConfigureDomain(activeDeployment.id)}
+                              disabled={deployActionLoading || !customDomainInput.trim()}
+                              className="px-4 py-2 rounded-lg bg-[#242126] hover:bg-[#38333D] text-xs font-semibold text-[#F5F1EA] transition-all disabled:opacity-50"
+                            >
+                              Configure Domain
+                            </button>
+                            {activeDeployment.custom_domain && (
+                              <button
+                                onClick={() => handleVerifyDomain(activeDeployment.id)}
+                                disabled={deployActionLoading}
+                                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-emerald-600/30 hover:bg-emerald-600/50 border border-emerald-500/40 text-emerald-300 text-xs font-semibold transition-all disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Verify DNS
+                              </button>
+                            )}
+                          </div>
+
+                          {/* DNS Table */}
+                          {activeDeployment.custom_domain && (
+                            <div className="overflow-x-auto rounded-lg border border-[#242126]">
+                              <table className="w-full text-left text-[11px] font-mono">
+                                <thead className="bg-[#111013] text-[#77717C] uppercase border-b border-[#242126]">
+                                  <tr>
+                                    <th className="py-2 px-3">Type</th>
+                                    <th className="py-2 px-3">Name / Host</th>
+                                    <th className="py-2 px-3">Target / Points To</th>
+                                    <th className="py-2 px-3">Status</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-[#242126] text-[#A9A4AE]">
+                                  <tr>
+                                    <td className="py-2 px-3 text-[#E8B968]">A</td>
+                                    <td className="py-2 px-3 text-[#F5F1EA]">@</td>
+                                    <td className="py-2 px-3">76.76.21.21</td>
+                                    <td className="py-2 px-3 text-emerald-400">Configured</td>
+                                  </tr>
+                                  <tr>
+                                    <td className="py-2 px-3 text-purple-400">CNAME</td>
+                                    <td className="py-2 px-3 text-[#F5F1EA]">www</td>
+                                    <td className="py-2 px-3">cname.vercel-dns.com</td>
+                                    <td className="py-2 px-3 text-emerald-400">Configured</td>
+                                  </tr>
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+
+                          {domainVerification && (
+                            <div
+                              className={`p-2.5 rounded-lg text-xs font-mono ${
+                                domainVerification.verified
+                                  ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/30"
+                                  : "bg-amber-500/10 text-amber-300 border border-amber-500/30"
+                              }`}
+                            >
+                              {domainVerification.verified
+                                ? `DNS verified for ${domainVerification.domain}. SSL is active.`
+                                : `DNS verification error: ${domainVerification.verification_error || "Pending propagation"}`}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="p-8 rounded-xl bg-[#1B191E] border border-[#242126] text-center space-y-3">
+                <Rocket className="w-10 h-10 text-purple-400 mx-auto opacity-70" />
+                <h3 className="text-sm font-semibold text-[#F5F1EA]">
+                  Production Deployment Pipeline Ready
+                </h3>
+                <p className="text-xs text-[#77717C] max-w-md mx-auto leading-relaxed">
+                  Verify your QA gates above and click &ldquo;Request Production&rdquo; to initiate Gate 5 human owner sign-off and cloud infrastructure publishing.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
 
         {/* Right Column: Generation History, Blueprint History & Session Baseline */}
         <div className="space-y-6">
+          {/* Phase 8 Deployment History Card */}
+          <div className="p-6 rounded-2xl bg-[#131215] border border-purple-500/30 space-y-4">
+            <div className="flex items-center justify-between border-b border-[#242126] pb-3">
+              <span className="text-xs font-semibold text-purple-400 uppercase tracking-wider">
+                Deployment History ({deployments.length})
+              </span>
+              <Rocket className="w-4 h-4 text-purple-400" />
+            </div>
+
+            {deployments.length > 0 ? (
+              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1">
+                {deployments.map((d) => {
+                  const isSelected = activeDeployment?.id === d.id;
+                  return (
+                    <button
+                      key={d.id}
+                      onClick={() => setActiveDeployment(d)}
+                      className={`w-full text-left p-3 rounded-xl border transition-all text-xs ${
+                        isSelected
+                          ? "bg-[#1B191E] border-purple-500"
+                          : "bg-[#1B191E]/50 border-[#242126] hover:border-purple-500/40"
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#F5F1EA]">v{d.source_version} {d.environment}</span>
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            d.status === "deployed"
+                              ? "bg-emerald-500/20 text-emerald-400"
+                              : d.status === "failed"
+                              ? "bg-red-500/20 text-red-400"
+                              : d.status === "awaiting_approval"
+                              ? "bg-amber-500/20 text-amber-400"
+                              : "bg-purple-500/20 text-purple-300"
+                          }`}
+                        >
+                          {d.status.replace(/_/g, " ")}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center mt-2 text-[10px] text-[#77717C]">
+                        <span>{new Date(d.created_at).toLocaleDateString()}</span>
+                        <span className="font-mono text-[#E8B968]">
+                          {d.github_commit_sha ? d.github_commit_sha.slice(0, 7) : d.provider}
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-[#1B191E] border border-[#242126] text-center text-xs text-[#77717C]">
+                No deployments executed yet.
+              </div>
+            )}
+          </div>
+
           {/* Phase 7 QA History Card */}
           <div className="p-6 rounded-2xl bg-[#131215] border border-[#E8B968]/30 space-y-4">
             <div className="flex items-center justify-between border-b border-[#242126] pb-3">

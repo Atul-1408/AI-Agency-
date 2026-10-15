@@ -132,16 +132,16 @@ export function Sidebar() {
             <span className="text-[12px] font-semibold text-[#F5F1EA] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
               Pipeline Capability
             </span>
-            <span className="text-[12px] font-bold text-[#E8B968] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
-              7 / 8 Active
+            <span className="text-[12px] font-bold text-[#39C98A] drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]">
+              8 / 8 Active
             </span>
           </div>
 
-          {/* Progress Bar (87.5%) */}
+          {/* Progress Bar (100%) */}
           <div className="h-[5px] rounded-full overflow-hidden bg-black/40 backdrop-blur-md mb-3 border border-white/10">
             <div
               className="h-full rounded-full transition-all duration-300 bg-gradient-to-r from-[#A87932] via-[#E8B968] to-[#39C98A] shadow-[0_0_10px_rgba(57,201,138,0.4)]"
-              style={{ width: "87.5%" }}
+              style={{ width: "100%" }}
             />
           </div>
 
@@ -179,14 +179,16 @@ export function Sidebar() {
               </span>
             </div>
 
-            <div className="flex items-center justify-between py-0.5 opacity-60">
+            <div className="flex items-center justify-between py-0.5">
               <div className="flex items-center gap-2">
-                <span className="w-4 h-4 rounded-full bg-[#77717C]/20 border border-[#77717C]/40 flex items-center justify-center text-[#77717C]">
-                  <Lock size={8} />
+                <span className="w-4 h-4 rounded-full bg-[#39C98A]/25 border border-[#39C98A]/50 flex items-center justify-center text-[#39C98A]">
+                  <Check size={9} strokeWidth={3} />
                 </span>
-                <span className="text-[#B7AFBA]">Phase 8</span>
+                <span className="text-[#F5F1EA] font-medium">Phase 8</span>
               </div>
-              <span className="text-[10px] text-[#77717C]">Deployment</span>
+              <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-[#39C98A]/15 border border-[#39C98A]/30 text-[#39C98A]">
+                Production Deploy
+              </span>
             </div>
           </div>
         </div>

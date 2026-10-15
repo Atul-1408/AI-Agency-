@@ -672,6 +672,84 @@ export const api = {
         body: JSON.stringify(payload ?? {}),
       }),
   },
+  // Phase 8 Production Deployment & Hosting
+  deployment: {
+    checkEligibility: (
+      projectId: string,
+      params?: { target_version?: number; code_generation_id?: string; qa_run_id?: string }
+    ) => {
+      const qs = new URLSearchParams(
+        Object.entries(params ?? {})
+          .filter(([, v]) => v !== undefined && v !== null)
+          .map(([k, v]) => [k, String(v)])
+      ).toString();
+      return apiFetch<WebsiteDeploymentEligibility>(
+        `/api/v1/projects/${projectId}/deployments/eligibility${qs ? `?${qs}` : ""}`
+      );
+    },
+    requestDeployment: (
+      projectId: string,
+      payload: {
+        environment?: DeploymentEnvironment;
+        target_version?: number;
+        code_generation_id?: string;
+        qa_run_id?: string;
+        custom_domain?: string;
+        github_repo_name?: string;
+        github_branch?: string;
+        force_mock?: boolean;
+      }
+    ) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/projects/${projectId}/deployments/request`, {
+        method: "POST",
+        body: JSON.stringify(payload),
+      }),
+    listDeployments: (projectId: string) =>
+      apiFetch<WebsiteDeployment[]>(`/api/v1/projects/${projectId}/deployments`),
+    getDeployment: (deploymentId: string) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}`),
+    approveDeployment: (deploymentId: string, notesOrPayload?: string | { notes?: string }) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/approve`, {
+        method: "POST",
+        body: JSON.stringify(
+          typeof notesOrPayload === "string"
+            ? { notes: notesOrPayload }
+            : (notesOrPayload ?? {})
+        ),
+      }),
+    executeDeployment: (deploymentId: string, forceMock?: boolean) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/execute`, {
+        method: "POST",
+        body: JSON.stringify({ force_mock: forceMock ?? false }),
+      }),
+    cancelDeployment: (deploymentId: string, reason?: string) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/cancel`, {
+        method: "POST",
+        body: JSON.stringify({ reason }),
+      }),
+    configureCustomDomain: (deploymentId: string, domainOrPayload: string | { domain: string }) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/domains`, {
+        method: "POST",
+        body: JSON.stringify(
+          typeof domainOrPayload === "string"
+            ? { domain: domainOrPayload }
+            : domainOrPayload
+        ),
+      }),
+    configureDomain: (deploymentId: string, domainOrPayload: string | { domain: string }) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/domains`, {
+        method: "POST",
+        body: JSON.stringify(
+          typeof domainOrPayload === "string"
+            ? { domain: domainOrPayload }
+            : domainOrPayload
+        ),
+      }),
+    verifyCustomDomain: (deploymentId: string) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/domains/verify`),
+    verifyDomain: (deploymentId: string) =>
+      apiFetch<WebsiteDeployment>(`/api/v1/deployments/${deploymentId}/domains/verify`),
+  },
 };
 
 
@@ -1521,5 +1599,90 @@ export interface QARepairResponse {
   new_version: number;
   diff_summary: string;
   changed_files: string[];
+}
+
+// ── Phase 8 Production Deployment & Hosting Types ───────────────────────────
+
+export type DeploymentEnvironment = "preview" | "production";
+
+export type WebsiteDeploymentStatus =
+  | "ready_for_deployment"
+  | "awaiting_approval"
+  | "approved"
+  | "deploying"
+  | "deployed"
+  | "failed"
+  | "cancelled";
+
+export type DeploymentProvider = "vercel" | "github" | "mock";
+
+export interface DNSRecord {
+  type: string;
+  name: string;
+  value: string;
+  description?: string | null;
+}
+
+export interface WebsiteDeployment {
+  id: string;
+  owner_id: string;
+  project_id: string;
+  build_session_id: string;
+  code_generation_id: string;
+  qa_run_id: string;
+  source_version: number;
+  source_checksum: string;
+  environment: DeploymentEnvironment;
+  status: WebsiteDeploymentStatus;
+  provider: DeploymentProvider;
+  deployment_url?: string | null;
+  production_url?: string | null;
+  custom_domain?: string | null;
+  dns_records: DNSRecord[];
+  ssl_status: string;
+  github_repo_url?: string | null;
+  github_repo_name?: string | null;
+  github_branch?: string | null;
+  github_commit_sha?: string | null;
+  provider_deployment_id?: string | null;
+  build_logs?: string | null;
+  error_code?: string | null;
+  error_message?: string | null;
+  approval_request_id?: string | null;
+  approved_at?: string | null;
+  approved_by?: string | null;
+  started_at?: string | null;
+  completed_at?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WebsiteDeploymentEligibility {
+  eligible: boolean;
+  is_eligible?: boolean;
+  reasons: string[];
+  warnings: string[];
+  project_id: string;
+  target_version?: number | null;
+  code_generation_id?: string | null;
+  qa_run_id?: string | null;
+  qa_status?: string | null;
+  qa_score?: number | null;
+  blocker_findings: number;
+  blocker_defects?: number;
+  high_findings: number;
+  high_defects?: number;
+  source_checksum?: string | null;
+  has_pending_approval: boolean;
+  approval_status?: string | null;
+}
+
+export type DeploymentEligibilityResponse = WebsiteDeploymentEligibility;
+
+export interface DomainVerificationResult {
+  domain: string;
+  verified: boolean;
+  ssl_status: string;
+  verification_error?: string | null;
 }
 

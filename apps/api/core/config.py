@@ -63,8 +63,16 @@ class Settings(BaseSettings):
     GMAIL_CLIENT_SECRET: str = ""
     GOOGLE_MAPS_API_KEY: str = ""
     GOOGLE_PLACES_API_KEY: str = ""
+
+    # ── Phase 8 Deployment & Hosting ──────────────────────────
+    DEPLOYMENT_PROVIDER: str = "mock"       # "mock" | "vercel" | "github"
     GITHUB_TOKEN: str = ""
+    GITHUB_USERNAME: str = ""
+    GITHUB_ORG: str = ""
     VERCEL_TOKEN: str = ""
+    VERCEL_TEAM_ID: str = ""
+    VERCEL_PROJECT_ID: str = ""
+    DEPLOYMENT_TOKEN_ENCRYPTION_KEY: str = ""
 
     # ── Email safeguards (enforced in Phase 3+) ───────────────
     MAX_EMAILS_PER_DAY: int = 50
