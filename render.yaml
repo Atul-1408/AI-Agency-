@@ -1,0 +1,71 @@
+services:
+  # ─── Web API (FastAPI) ──────────────────────────────────────
+  - type: web
+    name: agen-api
+    env: python
+    buildCommand: "pip install -r apps/api/requirements.txt"
+    startCommand: "cd apps/api && alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2"
+    plan: standard
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: APP_SECRET
+        generateValue: true
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agen-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: agen-redis
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: '["https://agen-dashboard.onrender.com"]'
+
+  # ─── Background Worker (ARQ) ────────────────────────────────
+  - type: worker
+    name: agen-worker
+    env: python
+    buildCommand: "pip install -r apps/api/requirements.txt"
+    startCommand: "cd apps/api && arq workers.main.WorkerSettings"
+    plan: standard
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: agen-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: agen-redis
+          property: connectionString
+
+  # ─── Next.js Dashboard ──────────────────────────────────────
+  - type: web
+    name: agen-dashboard
+    env: node
+    buildCommand: "npm install && npm run build --workspace=@agen/dashboard"
+    startCommand: "cd apps/dashboard && npm run start"
+    plan: standard
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        fromService:
+          type: web
+          name: agen-api
+          property: host
+      - key: NEXTAUTH_SECRET
+        generateValue: true
+
+databases:
+  - name: agen-db
+    databaseName: agen
+    user: agen
+    plan: standard
+
+  - name: agen-redis
+    plan: standard

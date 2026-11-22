@@ -37,14 +37,18 @@ def _get_engine():
         try:
             from sqlalchemy.ext.asyncio import create_async_engine
             from core.config import settings
-            _engine = create_async_engine(
-                settings.DATABASE_URL,
-                pool_size=5,
-                max_overflow=10,
-                pool_pre_ping=True,
-                pool_recycle=300,
-                echo=False,
-            )
+
+            engine_kwargs = {
+                "pool_pre_ping": True,
+                "pool_recycle": 300,
+                "echo": False,
+            }
+            # Only specify pool sizing for non-SQLite backends
+            if not settings.DATABASE_URL.startswith("sqlite"):
+                engine_kwargs["pool_size"] = 5
+                engine_kwargs["max_overflow"] = 10
+
+            _engine = create_async_engine(settings.DATABASE_URL, **engine_kwargs)
         except ModuleNotFoundError as exc:
             if "asyncpg" in str(exc):
                 from fastapi import HTTPException

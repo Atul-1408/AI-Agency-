@@ -1,0 +1,102 @@
+version: "3.9"
+
+services:
+  # ─── Production PostgreSQL 16 ───────────────────────────────
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-agen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-agen}
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-agen}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agen_internal
+
+  # ─── Production Redis 7 ─────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes --requirepass "${REDIS_PASSWORD:-agen_redis_pass}"
+    volumes:
+      - redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-agen_redis_pass}", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agen_internal
+
+  # ─── Production FastAPI API Service ─────────────────────────
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env.production
+    environment:
+      - APP_ENV=production
+      - RUN_MIGRATIONS=true
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - agen_internal
+      - agen_public
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
+
+  # ─── Production ARQ Worker Daemon ───────────────────────────
+  worker:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    restart: always
+    env_file: .env.production
+    environment:
+      - APP_ENV=production
+      - RUN_MIGRATIONS=false
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    networks:
+      - agen_internal
+    command: arq workers.main.WorkerSettings
+
+  # ─── Production Next.js Dashboard ───────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    restart: always
+    env_file: .env.production
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - agen_public
+
+volumes:
+  postgres_prod_data:
+  redis_prod_data:
+
+networks:
+  agen_internal:
+    internal: true
+  agen_public:
+    driver: bridge

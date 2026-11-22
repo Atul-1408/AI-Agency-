@@ -1,7 +1,7 @@
 version: "3.9"
 
 services:
-  # ─── PostgreSQL ────────────────────────────────────────────
+  # ─── PostgreSQL 16 ─────────────────────────────────────────
   db:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -18,8 +18,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - agen_network
 
-  # ─── Redis ─────────────────────────────────────────────────
+  # ─── Redis 7 ──────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -33,14 +35,21 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - agen_network
 
-  # ─── FastAPI Backend ───────────────────────────────────────
+  # ─── FastAPI Backend API ───────────────────────────────────
   api:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://agen:agen_pass@db:5432/agen
+      - DATABASE_URL_SYNC=postgresql://agen:agen_pass@db:5432/agen
+      - REDIS_URL=redis://redis:6379/0
+      - RUN_MIGRATIONS=true
     ports:
       - "8000:8000"
     depends_on:
@@ -50,24 +59,56 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/api:/app
+    networks:
+      - agen_network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
 
-  # ─── ARQ Worker ────────────────────────────────────────────
+  # ─── ARQ Background Worker ─────────────────────────────────
   worker:
     build:
       context: ./apps/api
       dockerfile: Dockerfile
     restart: unless-stopped
     env_file: .env
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://agen:agen_pass@db:5432/agen
+      - DATABASE_URL_SYNC=postgresql://agen:agen_pass@db:5432/agen
+      - REDIS_URL=redis://redis:6379/0
+      - RUN_MIGRATIONS=false
     depends_on:
       db:
         condition: service_healthy
       redis:
         condition: service_healthy
+      api:
+        condition: service_started
     volumes:
       - ./apps/api:/app
+    networks:
+      - agen_network
     command: arq workers.main.WorkerSettings
+
+  # ─── Next.js Owner Dashboard ──────────────────────────────
+  dashboard:
+    build:
+      context: .
+      dockerfile: apps/dashboard/Dockerfile
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXTAUTH_URL=http://localhost:3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - agen_network
 
 volumes:
   postgres_data:
   redis_data:
+
+networks:
+  agen_network:
+    driver: bridge

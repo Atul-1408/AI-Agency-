@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  /* Fonts */
+  --font-inter: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-serif: 'Playfair Display', Georgia, Cambria, "Times New Roman", serif;
+
   /* Exact Colors specified by user specification */
   --bg-primary: #0B0A0C;
   --bg-secondary: #111013;
