@@ -191,7 +191,7 @@ class SystemReadinessService:
         account_count = 0
         try:
             res = await db.execute(
-                text("SELECT count(*) FROM gmail_accounts WHERE status = 'CONNECTED'")
+                text("SELECT count(*) FROM gmail_accounts WHERE connection_status IN ('connected', 'CONNECTED')")
             )
             account_count = res.scalar() or 0
         except Exception:
