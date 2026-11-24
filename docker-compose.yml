@@ -45,7 +45,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://agen:agen_pass@db:5432/agen
-      - DATABASE_URL_SYNC=postgresql://agen:agen_pass@db:5432/agen
+      - DATABASE_URL_SYNC=postgresql+psycopg2://agen:agen_pass@db:5432/agen
       - REDIS_URL=redis://redis:6379/0
       - RUN_MIGRATIONS=true
     ports:
@@ -70,7 +70,7 @@ services:
     env_file: .env
     environment:
       - DATABASE_URL=postgresql+asyncpg://agen:agen_pass@db:5432/agen
-      - DATABASE_URL_SYNC=postgresql://agen:agen_pass@db:5432/agen
+      - DATABASE_URL_SYNC=postgresql+psycopg2://agen:agen_pass@db:5432/agen
       - REDIS_URL=redis://redis:6379/0
       - RUN_MIGRATIONS=false
     depends_on:

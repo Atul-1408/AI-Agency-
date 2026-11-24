@@ -40,7 +40,18 @@ from core.database import Base
 config = context.config
 
 # Override sqlalchemy.url with the value from our Settings object
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL_SYNC)
+sync_url = settings.DATABASE_URL_SYNC
+if sync_url.startswith("postgresql://"):
+    try:
+        import psycopg  # noqa: F401
+    except ImportError:
+        try:
+            import psycopg2  # noqa: F401
+            sync_url = sync_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+        except ImportError:
+            pass
+
+config.set_main_option("sqlalchemy.url", sync_url)
 
 # Set up logging from alembic.ini
 if config.config_file_name is not None:
