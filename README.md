@@ -76,26 +76,29 @@
 - Docker + Docker Compose
 - npm ≥ 10
 
-### 1. Clone and install dependencies
+### 1. One-Command Full-Stack Run (Docker — Recommended)
+
+To start the entire platform with PostgreSQL 16, Redis 7, FastAPI API, ARQ background worker, and Next.js Dashboard:
 
 ```bash
-git clone <repo>
-cd agen
-npm install
-```
+# 1. Clone repository
+git clone https://github.com/Atul-1408/AI-Agency-.git
+cd AI-Agency-
 
-### 2. Configure environment
-
-```bash
+# 2. Configure environment
 cp .env.example .env
-# Edit .env with your configuration
+
+# 3. Start full stack
+docker compose up --build
 ```
 
-### 3. Start database & Redis infrastructure
+- **Dashboard:** [http://localhost:3000](http://localhost:3000)
+- **API Swagger Docs:** [http://localhost:8000/api/docs](http://localhost:8000/api/docs)
+- **Production Guide:** See [PRODUCTION.md](file:///c:/Users/Atul/project/agen/PRODUCTION.md) for production VPS & Cloud deployment.
 
-```bash
-docker compose up db redis -d
-```
+---
+
+### 2. Manual Local Development (Without Docker)
 
 ### 4. Install Python dependencies and run database migrations
 
