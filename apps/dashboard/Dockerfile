@@ -10,14 +10,13 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY apps/dashboard/package.json ./apps/dashboard/
 
-# Install dependencies (ignoring scripts)
+# Install dependencies in monorepo
 RUN npm ci
 
 # Stage 2: Builder
 FROM base AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/dashboard/node_modules ./apps/dashboard/node_modules
 COPY . .
 
 # Set production environment for build
@@ -40,13 +39,15 @@ ENV HOSTNAME="0.0.0.0"
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Public assets & static output
+# Public assets & static output (supporting both root and monorepo path structures)
 COPY --from=builder /app/apps/dashboard/public ./public
+COPY --from=builder /app/apps/dashboard/public ./apps/dashboard/public
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/apps/dashboard/.next/static ./apps/dashboard/.next/static
 
 USER nextjs
 
 EXPOSE 3000
 
-CMD ["node", "apps/dashboard/server.js"]
+CMD ["sh", "-c", "if [ -f server.js ]; then node server.js; else node apps/dashboard/server.js; fi"]

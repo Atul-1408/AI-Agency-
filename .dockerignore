@@ -1,0 +1,19 @@
+# Root .dockerignore
+node_modules
+apps/*/node_modules
+.next
+apps/*/.next
+.venv
+apps/*/.venv
+.git
+.turbo
+*.log
+local_dev.db
+*.sqlite3
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+.ruff_cache
+dist
+build
