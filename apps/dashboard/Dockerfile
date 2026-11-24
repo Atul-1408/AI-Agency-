@@ -20,6 +20,8 @@ COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
 # Set production environment for build
+ARG NEXT_PUBLIC_API_URL=http://localhost:8000
+ENV NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL}
 ENV NODE_ENV=production
 ENV BUILD_STANDALONE=true
 ENV NEXT_TELEMETRY_DISABLED=1

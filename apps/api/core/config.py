@@ -6,6 +6,7 @@ No secrets are hardcoded here.
 from __future__ import annotations
 
 from typing import List
+from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -83,6 +84,27 @@ class Settings(BaseSettings):
     MAX_DAILY_SENDS: int = 30
     MAX_NEW_LEADS_PER_DAY: int = 20
     DOMAIN_PACING_SECONDS: int = 120
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Fail fast if insecure default secrets are used in production mode."""
+        if self.APP_ENV == "production":
+            insecure_secrets = {
+                "",
+                "CHANGE_ME",
+                "dev-secret-change-this-before-production",
+                "change_me_to_a_random_64_char_string",
+            }
+            if self.APP_SECRET in insecure_secrets or len(self.APP_SECRET) < 32:
+                raise ValueError(
+                    "APP_SECRET must be a cryptographically secure random string (>= 32 chars) in production. "
+                    "Run: python scripts/generate_production_secrets.py"
+                )
+            if not self.OWNER_EMAIL or not self.OWNER_PASSWORD_HASH:
+                raise ValueError(
+                    "OWNER_EMAIL and OWNER_PASSWORD_HASH must be configured in production."
+                )
+        return self
 
     @property
     def is_production(self) -> bool:

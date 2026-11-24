@@ -52,6 +52,11 @@ services:
     networks:
       - agen_internal
       - agen_public
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 4
 
   # ─── Production ARQ Worker Daemon ───────────────────────────
@@ -80,12 +85,20 @@ services:
     build:
       context: .
       dockerfile: apps/dashboard/Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     restart: always
     env_file: .env.production
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>process.exit(r.ok||r.status===307?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     networks:
       - agen_public
 
